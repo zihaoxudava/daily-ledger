@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f6f3">
+<title>日常账本 · 使用手册</title>
+<style>
+  :root{color-scheme:light;touch-action:manipulation;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#182820;background:#f4f6f3}
+  *{box-sizing:border-box}
+  body{margin:0}
+  main{max-width:820px;margin:auto;padding:calc(24px + env(safe-area-inset-top)) 16px calc(25px + env(safe-area-inset-bottom))}
+  header{background:#173d2d;color:#fff;border-radius:22px;padding:22px 25px}
+  h1,h2,p,ul,ol{margin:0}
+  h1{font-size:clamp(1.65rem,5vw,2.25rem);line-height:1.2}
+  header p{margin-top:8px;color:#d5ebda}
+  section{background:#fff;border:1px solid #dce4dd;border-radius:17px;margin-top:13px;padding:17px 21px}
+  h2{font-size:1.16rem;margin-bottom:8px}
+  ol,ul{padding-left:1.35rem}
+  li+li{margin-top:4px}
+  p+p,ul+p,ol+p{margin-top:8px}
+  a{color:#215c3a;font-weight:700}
+  .launch{display:inline-block;color:#173d2d;background:#cbf078;border-radius:9px;margin-top:12px;padding:6px 13px;text-decoration:none}
+  code{white-space:normal;overflow-wrap:anywhere;color:#1e5536}
+  footer{font-size:.85rem;color:#53655a;margin:14px 4px}
+  @media print{main{padding:0}header{background:none;color:inherit;border:1px solid #dce4dd}header p{color:inherit}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>日常账本使用手册</h1><p>iPhone 安装、离线记账、预算与换机</p>
+  <a class="launch" href="../">打开日常账本</a></header>
+  <section>
+    <h2>安装到 iPhone 主屏幕</h2>
+    <ol>
+      <li>用 <strong>Safari</strong> 打开上方链接即可使用日常账本。</li>
+      <li>轻点「共享」→「添加到主屏幕」。如果页面菜单收起了「共享」，先点页面菜单。看到「作为网页 App 打开」时将其开启，然后轻点「添加」。</li>
+      <li>回到主屏幕，从「日常账本」图标联网打开一次。等顶部显示「离线可用」后再断网测试。</li>
+      <li>可用飞行模式测试。开启后退出账本，从主屏幕图标重新打开并试记一笔。到「明细」核对，再删掉测试账目。</li>
+    </ol>
+    <p>请在主屏幕版建立正式账目。Safari 标签页与主屏幕版的本机数据可能各自保存，可以通过 JSON 备份迁移。</p>
+  </section>
+  <section>
+    <h2>记一笔与查明细</h2>
+    <ol>
+      <li>轻点底部「记一笔」，或在总览使用「支出」「收入」「转账」「退款」。填写金额、账户、日期和适用的分类，备注可选。</li>
+      <li>账户之间挪钱用「转账」。例如银行卡转入支付宝，当月收支不会改变。信用卡消费记支出，还款用转账转入信用卡。</li>
+      <li>收到商家退款时选「退款」，用原支出的分类和实际收款账户，日期填到账日。当月净支出会扣减这笔退款。</li>
+      <li>在「明细」按月份、类型、账户和分类组筛选，也能搜索备注或金额。点一条账目可编辑或删除，导出按钮只导出当前筛选结果。</li>
+      <li>轻点页面顶部的年月进入「月份总览」，用左右按钮换年。轻点某个月份即可返回原页面并切换到该月。</li>
+    </ol>
+  </section>
+  <section>
+    <h2>账户与分类</h2>
+    <ul>
+      <li>「更多」→「账户」可以新增账户、改名和填写期初余额。期初金额填开始记账前的余额，已有信用卡欠款可填负数。余额按今天及以前的账目累计，归档账户的历史和余额仍保留。</li>
+      <li>「更多」→「分类」下分支出和收入。展开分类组可添加二级分类、改名或归档分类。默认有餐饮、交通、校园、住房、项目和健康等分组。</li>
+    </ul>
+  </section>
+  <section>
+    <h2>预算、周期账单与统计</h2>
+    <ul>
+      <li>在总览点「设置预算」，或进入「更多」→「预算与周期」→「本期预算」。总预算和分类组预算各自显示使用进度。同一月同一范围只能设一项，换月可设置新的预算。</li>
+      <li>在「预算与周期」→「周期账单」新增每周、每月或每年的固定收支。可用总次数或截止日期结束规则，适合订阅、房租、工资和分期。首次日期若在过去，符合条件的到期账目会在保存时一并补记。</li>
+      <li>周期账单在打开 App 或回到前台时入账。暂停后再启用会从下一期继续。删除规则会保留已生成的账目。每月 31 日的规则遇到短月会在该月最后一天入账。</li>
+      <li>「统计」支持按月或按年，查看收入、净支出、结余和分类占比。结余等于选定期间的收入减净支出。转账只改变账户余额。</li>
+    </ul>
+  </section>
+  <section>
+    <h2>备份、恢复与 CSV</h2>
+    <ol>
+      <li><strong>换机或卸载前备份</strong>。去「更多」→「数据与备份」→「导出完整备份」，把 JSON 保存到 iPhone「文件」或你选的备份位置。</li>
+      <li><strong>恢复完整账本</strong>。在目标设备打开同一 App，轻点「恢复备份」，选 JSON，核对笔数后确认。恢复会覆盖目标设备已有的账本。</li>
+      <li><strong>导入流水</strong>。下载 CSV 模板，保留表头，保存为 UTF-8 CSV。日期用 <code>2026-11-23</code> 这样的格式，金额填正数，类型填「支出」「收入」「转账」或「退款」。转账填写转入账户并将两列分类留空，其余类型填分类组和分类，转入账户留空。</li>
+      <li><strong>避免重复</strong>。由本 App 导出的同一笔账目的记录编号保持一致，重复导入会跳过。自己填模板时可用唯一编号；留空会按新账目导入。CSV 用于流水，完整的预算、规则和期初余额请用 JSON。</li>
+    </ol>
+  </section>
+  <section>
+    <h2>常见问题</h2>
+    <ul>
+      <li><strong>看不到离线可用</strong>。在主屏幕版保持联网，关闭后重新打开，确认已进入账本页面。安装或更新时需要联网。</li>
+      <li><strong>另一台设备看不到记录</strong>。数据保存在当前设备的网页 App 中，通过导出和恢复 JSON 迁移。删除网页 App 或清理站点数据可能导致本地记录丢失。</li>
+      <li><strong>微信或支付宝账单导入失败</strong>。先将账单列整理成本 App 的 CSV 模板格式。应用不读取平台账号或银行卡数据。</li>
+    </ul>
+  </section>
+  <footer>日常账本 1.1 · 安装步骤参照 <a href="https://support.apple.com/zh-cn/guide/iphone/iphea86e5236/27/ios/27">Apple 官方指南</a></footer>
+</main>
+</body>
+</html>

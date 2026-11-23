@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f6f3">
+  <meta name="description" content="在 iPhone 主屏幕离线记录收支、账户和预算。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="icon" href="./icon-192.png">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="stylesheet" href="./style.css">
+  <title>日常账本</title>
+</head>
+<body>
+  <aside class="sidebar" aria-label="主导航">
+    <a class="brand" href="#overview"><img src="./apple-touch-icon.png" alt="" width="40" height="40"><span>日常账本<small>个人账本</small></span></a>
+    <nav class="side-nav" id="side-nav"></nav>
+    <button class="button primary side-add" data-action="new">＋ 记一笔</button>
+    <div class="sidebar-foot"><span class="status-dot"></span><span>账本数据存于本机</span></div>
+  </aside>
+  <header class="mobile-bar">
+    <a class="brand" href="#overview"><img src="./apple-touch-icon.png" alt="" width="34" height="34">日常账本</a>
+    <button type="button" id="mobile-status" class="offline-badge" data-action="offline-info" aria-live="polite"><span class="status-dot"></span>本机账本</button>
+  </header>
+  <main id="content" class="workspace" aria-busy="true">
+    <section class="panel system-message"><h1>正在打开账本…</h1><p>请稍候。</p></section>
+  </main>
+  <nav class="tabbar" id="tabbar" aria-label="主导航"></nav>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <input type="file" id="file-input" hidden>
+  <noscript><div class="system-message">日常账本需要开启 JavaScript。</div></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
