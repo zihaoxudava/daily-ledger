@@ -1,7 +1,7 @@
 'use strict';
 
 const prefix = 'daily-ledger-shell-';
-const cacheName = prefix + '1.3.0';
+const cacheName = prefix + '1.4.0';
 const base = new URL(self.registration.scope);
 const assets = [
   ['./','text/html'], ['./style.css','text/css'], ['./app.js','javascript'],

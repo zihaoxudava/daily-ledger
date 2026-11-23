@@ -1,7 +1,7 @@
 import { types } from './catalog.js';
-import { categoryOf, groupOf, accountOf, parseMoney, uid, validDate } from './store.js';
+import { categoryOf, groupOf, accountOf, parseMoney, uid, validDate, validTime } from './store.js';
 
-const headers = ['日期','类型','金额','账户','转入账户','分类组','分类','备注','记录编号'];
+const headers = ['日期','类型','金额','账户','转入账户','分类组','分类','备注','记录编号','时间'];
 const byName = Object.fromEntries(Object.entries(types).map(([type,label]) => [label,type]));
 const protect = value => /^[\s]*[=+\-@]|^[\t\r\n]|^'/.test(value) ? "'" + value : value;
 const unprotect = value => value.startsWith("'") && protect(value.slice(1)) === value ? value.slice(1) : value;
@@ -13,7 +13,7 @@ export function exportCSV(book, entries = book.entries) {
     return [
       entry.date, types[entry.type], (entry.amount / 100).toFixed(2), accountOf(book, entry.account).name,
       accountOf(book, entry.to)?.name ?? '', category ? groupOf(book, category.group).name : '',
-      category?.name ?? '', entry.note, entry.id,
+      category?.name ?? '', entry.note, entry.id, entry.time ?? '',
     ];
   });
   return '\uFEFF' + [headers, ...rows].map(row => row.map(quote).join(',')).join('\r\n');
@@ -81,9 +81,11 @@ export function importCSV(book, raw) {
       const categoryName = get('分类');
       const note = row[names.indexOf('备注')] ?? '';
       const providedId = get('记录编号');
+      const time = get('时间');
       if (!Object.hasOwn(types,type) || !validDate(date) || !accountName || note.length > 160 ||
         [accountName,toName,groupName,categoryName].some(name => name.length > 28) ||
         (providedId && !/^[a-zA-Z0-9_-]{1,100}$/.test(providedId))) throw new Error('日期、类型、账户、备注或编号无效。');
+      if (!validTime(time)) throw new Error('时间请填 24 小时制的 HH:mm，或留空。');
       if (type === 'transfer' ? !toName || toName === accountName || groupName || categoryName : toName || !groupName || !categoryName) {
         throw new Error('请检查分类和转入账户。');
       }
@@ -100,7 +102,7 @@ export function importCSV(book, raw) {
         category = findOrAdd(book.categories, item => item.group===group && item.name===categoryName, {group,name:categoryName,archived:false});
       }
       const id = providedId || uid();
-      book.entries.push({id,type,date,account,to,category,note,amount});
+      book.entries.push({id,type,date,account,to,category,note,amount,...(time?{time}:{})});
       ids.add(id);
       added++;
     } catch (error) {

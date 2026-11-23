@@ -1,18 +1,19 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
-import { today, shiftMonth, uid, money, parseMoney, readBook, writeBook, applyRecurring, validate,
-  validDate, validMonth, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining } from './store.js';
+import { today, shiftMonth, uid, money, parseMoney, readBook, writeBook, applyRecurring, hasDueRecurring, validate,
+  validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
-import { pages, nav, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
+import { pages, nav, esc, icon, option, optionMap, label, dateInput, timeInput, amountInput, textInput,
   categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth } from './views.js';
 
 const $ = selector => document.querySelector(selector);
 const content = $('#content');
 const dialog = $('#dialog');
 const dialogContent = $('#dialog-content');
+const categoryDialog = $('#quick-category');
 const fileInput = $('#file-input');
 const toast = $('#toast');
-const appVersion = '1.3.0';
+const appVersion = '1.4.0';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
@@ -20,6 +21,7 @@ const ui = {
 };
 const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
+let pendingRefresh=0, refreshing=false;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
 
@@ -65,23 +67,41 @@ function render() {
   if (book || storageError) content.setAttribute('aria-busy','false');
 }
 
-async function refresh(runDue=false) {
+function refresh(runDue=false) {
+  pendingRefresh=Math.max(pendingRefresh,runDue ? 2 : 1);
+  return flushRefresh();
+}
+
+async function flushRefresh() {
+  if (!pendingRefresh || refreshing || dialog.open || busy) return;
+  const request=pendingRefresh;
+  pendingRefresh=0;
+  refreshing=true;
   try {
     const data = await readBook();
-    if (runDue && data.rules.some(rule => !rule.paused)) {
-      const before = data.entries.length;
-      const date=today();
-      book = await writeBook(current => { applyRecurring(current,date); });
-      const added = book.entries.length-before;
+    if (dialog.open || busy) {
+      pendingRefresh=Math.max(pendingRefresh,request);
+      return;
+    }
+    const date=today();
+    if (request===2 && hasDueRecurring(data,date)) {
+      let added=0;
+      book = await writeBook(current => {
+        const before=current.entries.length;
+        applyRecurring(current,date);
+        added=current.entries.length-before;
+      });
       if (added>0) tell(`已自动记入 ${added} 笔到期账单`);
     } else {
       book=data;
     }
     storageError=undefined;
-    render();
   } catch (error) {
     storageError=showError(error);
-    render();
+  } finally {
+    refreshing=false;
+    if (!dialog.open && !busy) render();
+    flushRefresh();
   }
 }
 
@@ -108,10 +128,20 @@ function errorInModal(message) {
 
 function entryFields(type, fields={}, prefix='') {
   const category = type!=='transfer'
-    ? label(type==='refund' ? '原支出分类' : '分类',`<select name="${prefix}category" required>${categoryOptions(book,type,fields.category)}</select>`)
+    ? `<div class="field entry-category">
+        <div class="category-caption">
+          <label for="${prefix}entry-category">${type==='refund' ? '原支出分类' : '分类'}</label>
+          <button type="button" class="link-button" data-action="quick-category" data-id="${prefix}entry-category">＋ 添加分类</button>
+        </div>
+        <select id="${prefix}entry-category" name="${prefix}category" data-entry-category="${type}" required>${categoryOptions(book,type,fields.category)}</select>
+      </div>`
     : '';
-  return `<div class="field-row">${label(type==='transfer'?'转出账户':'账户',`<select name="${prefix}account" required>${accountOptions(book,fields.account,'请选择账户')}</select>`)}
+  return `<div class="field-row entry-accounts">${label(type==='transfer'?'转出账户':'账户',`<select name="${prefix}account" required>${accountOptions(book,fields.account,'请选择账户')}</select>`)}
   ${type==='transfer' ? label('转入账户',`<select name="${prefix}to" required>${accountOptions(book,fields.to,'请选择账户',fields.account)}</select>`) : category}</div>`;
+}
+
+function dateFields(date,time,labelText='日期') {
+  return `<div class="field-row">${label(labelText,dateInput('date',date))}${label('时间（选填）',timeInput('time',time))}</div>`;
 }
 
 function openEntry(record, type='expense') {
@@ -125,7 +155,7 @@ function openEntry(record, type='expense') {
     <div class="segments" aria-label="账目类型">${choices}</div>
     ${label('金额（人民币）',amountInput(record?.amount),'form-amount')}
     <div id="entry-fields">${entryFields(type,defaults)}</div>
-    ${label('日期',dateInput('date',record?.date ?? today()))}
+    ${dateFields(record?.date ?? today(),record?.time)}
     ${label('备注',textInput('note',record?.note ?? '',160,false,'商家、用途或其他说明'))}`;
   modalFrame(state,record?'编辑账目':'记一笔',html,(record ? remove('删除') : cancel)+submit('保存账目'));
 }
@@ -134,21 +164,33 @@ const batchRows = () => [...dialog.querySelectorAll('[data-batch-row]')];
 const rowPrefix = row => `batch-${row.dataset.batchRow}-`;
 const rowControl = (row,key) => row.querySelector(`[name="${rowPrefix(row)}${key}"]`);
 
+let batchFrame=0;
 function fitBatchSheet() {
   const viewport=window.visualViewport;
-  if (!dialog.open || modal.kind!=='batch' || !viewport) return;
-  const unscaled=viewport.scale===1;
-  dialog.style.setProperty('--batch-height',unscaled?`${viewport.height}px`:'');
-  dialog.style.setProperty('--batch-bottom',unscaled?`${Math.max(0,window.innerHeight-viewport.height-viewport.offsetTop)}px`:'');
+  if (!dialog.open || modal.kind!=='batch' || !viewport || batchFrame) return;
+  batchFrame=requestAnimationFrame(()=>{
+    batchFrame=0;
+    if (!dialog.open || modal.kind!=='batch') return;
+    const unscaled=viewport.scale===1;
+    const height=unscaled?`${Math.round(viewport.height)}px`:'';
+    const bottom=unscaled?`${Math.max(0,Math.round(window.innerHeight-viewport.height-viewport.offsetTop))}px`:'';
+    if (dialog.style.getPropertyValue('--batch-height')!==height) dialog.style.setProperty('--batch-height',height);
+    if (dialog.style.getPropertyValue('--batch-bottom')!==bottom) dialog.style.setProperty('--batch-bottom',bottom);
+  });
 }
 
 function updateBatchCount() {
   const rows=batchRows();
   rows.forEach((row,index)=>{
-    row.querySelector('h3').textContent=`第 ${index+1} 笔`;
-    row.querySelector('[data-action="remove-batch-row"]').hidden=rows.length===1;
+    const title=row.querySelector('h3');
+    const text=`第 ${index+1} 笔`;
+    if (title.textContent!==text) title.textContent=text;
+    const removeButton=row.querySelector('[data-action="remove-batch-row"]');
+    if (removeButton.hidden!==(rows.length===1)) removeButton.hidden=rows.length===1;
   });
-  $('#batch-submit').textContent=`保存 ${rows.length} 笔`;
+  const button=$('#batch-submit');
+  const text=`保存 ${rows.length} 笔`;
+  if (button.textContent!==text) button.textContent=text;
 }
 
 function appendBatchRow(fields={}, focus=false) {
@@ -163,14 +205,13 @@ function appendBatchRow(fields={}, focus=false) {
         ${label('账目类型',`<select name="${prefix}type">${optionMap(types,type)}</select>`)}
       </div>
       <div class="batch-fields">${entryFields(type,fields,prefix)}</div>
-      ${label('备注',textInput(prefix+'note',fields.note ?? '',160,false,'选填'))}
+      <div class="field-row">
+        ${label('时间（选填）',timeInput(prefix+'time',fields.time))}
+        ${label('备注',textInput(prefix+'note',fields.note ?? '',160,false,'选填'))}
+      </div>
     </section>`);
   updateBatchCount();
-  if (focus) {
-    const row=$(`[data-batch-row="${id}"]`);
-    row.scrollIntoView({block:'nearest'});
-    rowControl(row,'amount').focus({preventScroll:true});
-  }
+  if (focus) rowControl($(`[data-batch-row="${id}"]`),'amount').focus();
 }
 
 function openBatch() {
@@ -183,6 +224,7 @@ function openBatch() {
     category:draft?.get('category'),
     to:draft?.get('to'),
     note:draft?.get('note'),
+    time:draft?.get('time'),
   };
   modalFrame({kind:'batch',nextRow:1},'批量记账',`
     <div class="batch-date">
@@ -211,7 +253,7 @@ function openDebt(debt,direction) {
     ${label('借款方向',`<select name="direction">${optionMap(debtDirections,initialDirection)}</select>`)}
     ${label('对方姓名',textInput('person',debt?.person ?? '',40,true,'姓名或称呼'))}
     ${label('本金（元）',amountInput(debt?.amount),'form-amount')}
-    ${label('借款日期',dateInput('date',debt?.date ?? today()))}
+    ${dateFields(debt?.date ?? today(),debt?.time,'借款日期')}
     ${label('备注',textInput('note',debt?.note ?? '',160,false,'选填'))}`;
   modalFrame({kind:'debt',id:debt?.id},debt?'编辑借款':initialDirection==='lent'?'新增借出':'新增借入',
     html,(debt?remove('删除'):cancel)+submit('保存借款'));
@@ -221,12 +263,12 @@ function openDebtDetail(debt) {
   const lent=debt.direction==='lent';
   const remaining=debtRemaining(debt);
   const payLabel=lent?'记收款':'记还款';
-  const repayments=[...debt.payments].reverse().sort((a,b)=>b.date.localeCompare(a.date)).map(payment=>`
+  const repayments=[...debt.payments].reverse().sort(newestFirst).map(payment=>`
     <button type="button" class="debt-row" data-action="edit-debt-payment" data-id="${esc(payment.id)}">
-      <span><strong>${payment.date}</strong>${payment.note?`<small>${esc(payment.note)}</small>`:''}</span>
+      <span><strong>${esc(dateAndTime(payment))}</strong>${payment.note?`<small>${esc(payment.note)}</small>`:''}</span>
       <span class="debt-row-amount"><strong class="number">${money(payment.amount)}</strong></span>
     </button>`).join('');
-  const html=`<p>${debtDirections[debt.direction]} · ${debt.date}</p>
+  const html=`<p>${debtDirections[debt.direction]} · ${esc(dateAndTime(debt))}</p>
     <dl class="debt-facts">
       <div><dt>本金</dt><dd class="number">${money(debt.amount)}</dd></div>
       <div><dt>${lent?'已收回':'已归还'}</dt><dd class="number">${money(debtRepaid(debt))}</dd></div>
@@ -245,7 +287,7 @@ function openDebtPayment(debt,payment) {
   const todayDate=today();
   const html=`<p>${esc(debt.person)} · ${lent?'本次最多可收回':'本次最多可归还'} ${money(available)}</p>
     ${label('金额（元）',amountInput(payment?.amount),'form-amount')}
-    ${label('日期',dateInput('date',payment?.date ?? (debt.date>todayDate?debt.date:todayDate)))}
+    ${dateFields(payment?.date ?? (debt.date>todayDate?debt.date:todayDate),payment?.time)}
     ${label('备注',textInput('note',payment?.note ?? '',160,false,'选填'))}`;
   modalFrame({kind:'debt-payment',debtId:debt.id,id:payment?.id},payment?'编辑还款记录':lent?'记收款':'记还款',
     html,(payment?remove('删除'):cancel)+submit('保存'));
@@ -275,6 +317,63 @@ function openCategory(category, groupId) {
     ${label('分类名称',textInput('name',category?.name ?? '',28,true))}
     ${category?label('状态',`<select name="archived">${option('no','使用中',category.archived?'yes':'no')+option('yes','归档',category.archived?'yes':'no')}</select>`):''}`;
   modalFrame({kind:'category',id:category?.id,group:group.id},category?'编辑分类':'新增二级分类',html,cancel+submit('保存分类'));
+}
+
+function openQuickCategory(selectId) {
+  const select=document.getElementById(selectId);
+  const type=select.dataset.entryCategory==='income'?'income':'expense';
+  const group=categoryOf(book,select.value)?.group ?? '';
+  const groups=groupOptions(book,group,type);
+  must(groups,'请先在「更多 → 分类」中新建这个收支类型的分类组。');
+  categoryDialog.dataset.select=selectId;
+  categoryDialog.innerHTML=`
+    <header class="modal-head"><h2 id="quick-category-title">添加分类</h2></header>
+    <form id="quick-category-form">
+      <div class="modal-body">
+        ${label('分类名称',textInput('name','',28,true,'例如：打印、跑步'))}
+        ${label('分类组',`<select name="group" required>${option('','请选择分类组',group)+groups}</select>`)}
+        <p class="error" role="alert" hidden></p>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="button neutral" data-action="close-quick-category">取消</button>
+        ${submit('保存并选用')}
+      </footer>
+    </form>`;
+  categoryDialog.querySelector('[name=name]').autofocus=true;
+  categoryDialog.showModal();
+}
+
+async function saveQuickCategory(event) {
+  event.preventDefault();
+  if (busy) return;
+  const form=event.target;
+  const data=new FormData(form);
+  const get=name=>String(data.get(name) ?? '').trim();
+  const target=document.getElementById(categoryDialog.dataset.select);
+  const state={id:uid(),group:get('group'),type:target.dataset.entryCategory==='income'?'income':'expense'};
+  const errorLine=form.querySelector('.error');
+  errorLine.hidden=true;
+  busy=true;
+  if (event.submitter) event.submitter.disabled=true;
+  try {
+    book=await writeBook(current=>save.category(current,state,get));
+    const options=new Map();
+    for (const select of dialog.querySelectorAll('[data-entry-category]')) {
+      const type=select.dataset.entryCategory==='income'?'income':'expense';
+      if (type!==state.type) continue;
+      const chosen=select===target ? state.id : select.value;
+      if (!options.has(chosen)) options.set(chosen,categoryOptions(book,type,chosen));
+      select.innerHTML=options.get(chosen);
+    }
+    channel?.postMessage('change');
+    categoryDialog.close();
+  } catch (error) {
+    errorLine.textContent=showError(error);
+    errorLine.hidden=false;
+  } finally {
+    if (event.submitter) event.submitter.disabled=false;
+    busy=false;
+  }
 }
 
 function openGroup(group) {
@@ -345,11 +444,17 @@ function makeEntry(current, type, get, date, id=uid()) {
   must(Object.hasOwn(types,type),'请选择账目类型。');
   const transfer=type==='transfer';
   const item={id,type,amount:parseMoney(get('amount')),date,account:get('account'),
-    to:transfer?get('to'):'',category:transfer?'':get('category'),note:get('note')};
+    to:transfer?get('to'):'',category:transfer?'':get('category'),note:get('note'),...optionalTime(get)};
   must(accountOf(current,item.account),'请选择账户。');
   if (transfer) must(accountOf(current,item.to) && item.account!==item.to,'请选择不同的转入和转出账户。');
   else must(categoryOf(current,item.category),'请选择分类。');
   return item;
+}
+
+function optionalTime(get) {
+  const time=get('time');
+  must(validTime(time),'请填写有效时间，或留空。');
+  return time ? {time} : {};
 }
 
 const save = {
@@ -362,7 +467,7 @@ const save = {
     const existing=debtOf(current,s.id);
     if (s.id) must(existing,'这项借款已被移除。');
     const debt={id:s.id ?? uid(),direction:get('direction'),person:get('person'),amount:parseMoney(get('amount')),
-      date:get('date'),note:get('note'),payments:existing?.payments ?? []};
+      date:get('date'),note:get('note'),payments:existing?.payments ?? [],...optionalTime(get)};
     must(debt.person,'请填写对方姓名。');
     must(validDate(debt.date),'请填写有效日期。');
     must(debtRemaining(debt)>=0,'本金不能小于已记录的还款金额。');
@@ -374,7 +479,7 @@ const save = {
     must(debt,'这项借款已被移除。');
     const previous=debt.payments.find(payment=>payment.id===s.id);
     if (s.id) must(previous,'这笔还款已被移除。');
-    const payment={id:s.id ?? uid(),amount:parseMoney(get('amount')),date:get('date'),note:get('note')};
+    const payment={id:s.id ?? uid(),amount:parseMoney(get('amount')),date:get('date'),note:get('note'),...optionalTime(get)};
     must(validDate(payment.date) && payment.date>=debt.date,'请填写有效日期，且不早于借款日期。');
     must(payment.amount<=debtRemaining(debt)+(previous?.amount ?? 0),'金额不能超过这项借款的剩余金额。');
     upsert(debt.payments,payment);
@@ -394,6 +499,8 @@ const save = {
   },
   category(current,s,get) {
     const item={id:s.id ?? uid(),group:s.group,name:get('name'),archived:get('archived')==='yes'};
+    const group=groupOf(current,item.group);
+    must(group && (!s.type || s.type===group.type),'请选择有效的分类组。');
     must(item.name && !current.categories.some(c=>c.group===item.group && c.name===item.name && c.id!==item.id),
       '请填写该组内未被占用的分类名。');
     upsert(current.categories,item);
@@ -482,6 +589,7 @@ async function submitModal(event) {
   } finally {
     if (submitter) submitter.disabled=false;
     busy=false;
+    flushRefresh();
   }
 }
 
@@ -549,6 +657,8 @@ const actions = {
   account:id=>openAccount(accountOf(book,id)),
   group:id=>openGroup(groupOf(book,id)),
   category:id=>{ const category=categoryOf(book,id); if (category) openCategory(category); },
+  'quick-category':openQuickCategory,
+  'close-quick-category':()=>categoryDialog.close(),
   'category-add':id=>openCategory(null,id),
   rule:id=>openRule(book.rules.find(rule=>rule.id===id)),
   'category-kind':id=>{ ui.categoryKind=id; render(); },
@@ -636,7 +746,10 @@ if (/iP(?:ad|hone|od)/.test(navigator.userAgent) || (navigator.platform==='MacIn
   let touchStart, lastTap;
   const resetTaps=()=>{ touchStart=lastTap=undefined; };
   document.addEventListener('touchstart',event=>{
-    if (event.touches.length!==1) { resetTaps(); return; }
+    if (event.touches.length!==1 || event.target.closest('dialog button, input, select, textarea, label')) {
+      resetTaps();
+      return;
+    }
     const {clientX:x,clientY:y}=event.touches[0];
     touchStart={x,y,time:event.timeStamp};
   },{passive:true});
@@ -659,22 +772,28 @@ if (/iP(?:ad|hone|od)/.test(navigator.userAgent) || (navigator.platform==='MacIn
   document.addEventListener('touchcancel',resetTaps,{passive:true});
 }
 fileInput.addEventListener('change',inspectFile);
+categoryDialog.addEventListener('submit',saveQuickCategory);
+categoryDialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
 dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
 dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal.kind!=='batch') dialog.close(); });
+dialog.addEventListener('close',()=>{
+  flushRefresh();
+  checkUpdate();
+});
 window.visualViewport?.addEventListener('resize',fitBatchSheet);
 window.visualViewport?.addEventListener('scroll',fitBatchSheet);
 window.addEventListener('hashchange',()=>route(true));
 window.addEventListener('pageshow',event=>{
   if (!event.persisted) return;
   if (book) refresh(true);
-  checkUpdate();
+  if (!dialog.open) checkUpdate();
 });
 document.addEventListener('visibilitychange',()=>{
   if (document.visibilityState!=='visible') return;
   if (book) refresh(true);
-  checkUpdate();
+  if (!dialog.open) checkUpdate();
 });
-if (channel) channel.onmessage=()=>{ if (!busy) refresh(); };
+if (channel) channel.onmessage=()=>refresh();
 
 function offlineStatus() {
   ui.offlineReady=!!navigator.serviceWorker?.controller;

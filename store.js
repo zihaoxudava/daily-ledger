@@ -63,6 +63,10 @@ export const categoryLabel = (book, id) => {
 export const validDate = date => typeof date === 'string' && /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date) &&
   new Date(`${date}T00:00:00Z`).toISOString().slice(0,10) === date;
 export const validMonth = month => typeof month === 'string' && validDate(`${month}-01`);
+export const validTime = time => time === undefined || time === '' ||
+  typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+export const newestFirst = (a,b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? '');
+export const dateAndTime = ({date,time}) => time ? `${date} ${time}` : date;
 const validId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
 const validAmount = (cents, signed = false) => Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_AMOUNT && (signed || cents > 0);
 const validText = (value, max, allowEmpty = false) => typeof value === 'string' && value.length <= max && (allowEmpty || value.trim().length > 0);
@@ -85,7 +89,7 @@ export function validate(book) {
   const accounts = indexList(book.accounts, acc => Object.hasOwn(accountTypes, acc.type) && validText(acc.name,28) && validAmount(acc.opening, true) && typeof acc.archived === 'boolean', 300);
   const matches = (cat, type) => categories.has(cat) && groups.get(categories.get(cat).group).type === (type === 'income' ? 'income' : 'expense');
   if (!book.accounts.some(acc => !acc.archived) || !groups.size) throw new Error('备份需要至少一个使用中的账户和分类组。');
-  indexList(book.entries, entry => validAmount(entry.amount) && validDate(entry.date) && accounts.has(entry.account) && validText(entry.note,160,true) &&
+  indexList(book.entries, entry => validAmount(entry.amount) && validDate(entry.date) && validTime(entry.time) && accounts.has(entry.account) && validText(entry.note,160,true) &&
     (entry.type === 'transfer' ? accounts.has(entry.to) && entry.to !== entry.account && entry.category === '' :
       ['expense','income','refund'].includes(entry.type) && matches(entry.category, entry.type) && entry.to === ''),
   60000);
@@ -103,8 +107,8 @@ export function validate(book) {
     (r.count === null || Number.isInteger(r.count) && r.count > 0 && r.count <= 600), 500);
   indexList(book.debts, debt=>{
     if (!Object.hasOwn(debtDirections,debt.direction) || !validText(debt.person,40) ||
-      !validAmount(debt.amount) || !validDate(debt.date) || !validText(debt.note,160,true)) return false;
-    indexList(debt.payments,payment=>validAmount(payment.amount) && validDate(payment.date) &&
+      !validAmount(debt.amount) || !validDate(debt.date) || !validTime(debt.time) || !validText(debt.note,160,true)) return false;
+    indexList(debt.payments,payment=>validAmount(payment.amount) && validDate(payment.date) && validTime(payment.time) &&
       payment.date>=debt.date && validText(payment.note,160,true),60000);
     return debtRemaining(debt)>=0;
   },60000);
@@ -161,13 +165,19 @@ export async function writeBook(change) {
   });
 }
 
+function nextDue(rule, through) {
+  if (rule.paused || (rule.count !== null && rule.next >= rule.count)) return;
+  const date = occurrence(rule, rule.next);
+  if (date <= through && (!rule.end || date <= rule.end)) return date;
+}
+
+export const hasDueRecurring = (book,date) => book.rules.some(rule => nextDue(rule,date));
+
 export function applyRecurring(book, date) {
   const recorded = new Set(book.entries.map(entry => entry.id));
   for (const rule of book.rules) {
-    if (rule.paused) continue;
-    while (rule.count === null || rule.next < rule.count) {
-      const due = occurrence(rule, rule.next);
-      if (due > date || (rule.end && due > rule.end)) break;
+    let due;
+    while ((due = nextDue(rule,date))) {
       const id = `${rule.id}_${due}`;
       if (!recorded.has(id)) {
         const note = rule.count === null ? rule.name : `${rule.name}（${rule.next+1}/${rule.count}）`;

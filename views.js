@@ -1,5 +1,5 @@
 import { types, accountTypes, frequencies } from './catalog.js';
-import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining } from './store.js';
+import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining, newestFirst, dateAndTime } from './store.js';
 import { occurrence } from './schedule.js';
 
 const glyphs = {
@@ -12,6 +12,7 @@ const glyphs = {
   expense:'<circle cx="12" cy="12" r="8"/><path d="M8.5 12h7"/>',
   income:'<circle cx="12" cy="12" r="8"/><path d="M8.5 12h7M12 8.5v7"/>',
   transfer:'<path d="M3 8h16m-4-4 4 4-4 4m6 4H5m4 4-4-4 4-4"/>',
+  debts:'<path d="M12 4v16M5 7h14M7 7l-3 7h6L7 7Zm10 0-3 7h6l-3-7ZM8 20h8"/>',
   refund:'<path d="M9 5 4 10l5 5m-5-5h10a5 5 0 0 1 0 10h-3"/>',
   wallet:'<path d="M19 7V5H6a2 2 0 0 0 0 4h14v11H6a2 2 0 0 1-2-2V7m16 5h-5a2 2 0 0 0 0 4h5"/>',
   categories:'<path d="m3 8 5-5h6l7 7-11 11-7-7Z"/><circle cx="9" cy="8" r="1"/>',
@@ -30,8 +31,8 @@ export const fmtMonth = month => month.replace(/-(0?)(\d+)$/, '年$2月');
 const fmtDate = date => `${Number(date.slice(5,7))}月${Number(date.slice(8,10))}日`;
 const value = amount => `<b class="number">${money(amount)}</b>`;
 
-const titles = {overview:'总览',records:'明细',reports:'统计',plan:'预算',settings:'更多',accounts:'账户',categories:'分类',files:'数据与备份'};
-export const tabs = ['overview','records','reports','plan','settings'];
+const titles = {overview:'总览',records:'明细',reports:'统计',plan:'预算',debts:'借出借入',settings:'更多',accounts:'账户',categories:'分类',files:'数据与备份'};
+export const tabs = ['overview','records','reports','plan','debts','settings'];
 const isSelected = (a,b) => a === b ? ' selected' : '';
 const selected = (a,b) => `aria-pressed="${a===b}"`;
 const button = (text, action, type='secondary', id='') =>
@@ -40,6 +41,8 @@ export const option = (id,label,chosen) => `<option value="${esc(id)}"${isSelect
 export const label = (text, content, cls='') => `<label class="field ${cls}"><span>${text}</span>${content}</label>`;
 export const dateInput = (name, date, required = true) =>
   `<input type="date" name="${name}" value="${esc(date)}" min="2000-01-01" max="2099-12-31"${required?' required':''}>`;
+export const timeInput = (name, time='') =>
+  `<input type="time" name="${name}" value="${esc(time)}">`;
 export const amountInput = (amount, required = true) =>
   `<input name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${amount == null ? '' : (amount/100).toFixed(2)}"${required?' required':''}>`;
 export const textInput = (name, text, limit, required=false, placeholder='') =>
@@ -61,10 +64,10 @@ function setting(glyph,title,subtitle,action,target='') {
 }
 
 export function nav(page, mobile) {
-  const current = ['accounts','categories','files','debts'].includes(page) ? 'settings' : page;
+  const current = ['accounts','categories','files'].includes(page) ? 'settings' : page;
   const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''}>${icon(tab)}<span>${titles[tab]}</span></a>`;
   if (!mobile) return tabs.map(link).join('');
-  return [link('overview'),link('records'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('reports'),link('settings')].join('');
+  return [link('overview'),link('records'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('reports'),link('debts'),link('settings')].join('');
 }
 
 function periodArrows(unit, previous, middle, next, action='period') {
@@ -86,9 +89,15 @@ export function accountOptions(book, chosen, emptyLabel='', excluded='') {
 }
 export function categoryOptions(book, type, chosen='', emptyLabel='请选择分类') {
   const kind = type === 'income' ? 'income' : 'expense';
+  const optionsByGroup = new Map();
+  for (const category of book.categories) {
+    if (category.archived && category.id !== chosen) continue;
+    const markup = option(category.id,category.name + (category.archived ? '（已归档）' : ''),chosen);
+    optionsByGroup.set(category.group,(optionsByGroup.get(category.group) ?? '') + markup);
+  }
   return option('',emptyLabel,chosen) + book.groups.filter(group => group.type === kind).map(group => {
-    const available = book.categories.filter(cat => cat.group === group.id && (!cat.archived || cat.id === chosen));
-    return available.length ? `<optgroup label="${esc(group.name)}">${available.map(cat => option(cat.id,cat.name + (cat.archived ? '（已归档）' : ''),chosen)).join('')}</optgroup>` : '';
+    const available = optionsByGroup.get(group.id);
+    return available ? `<optgroup label="${esc(group.name)}">${available}</optgroup>` : '';
   }).join('');
 }
 export const groupOptions = (book,chosen,kind) => book.groups.filter(g => !kind || g.type===kind)
@@ -99,7 +108,7 @@ export function entryRow(book, entry) {
   const title = entry.note || (entry.type === 'transfer' ? '账户转账' : category.name);
   const from = accountOf(book,entry.account).name;
   const account = entry.to ? `${from} → ${accountOf(book,entry.to).name}` : from;
-  const details = [fmtDate(entry.date),entry.type === 'refund' ? `退款 · ${category.name}` : category?.name,account].filter(Boolean).join(' · ');
+  const details = [fmtDate(entry.date),entry.time,entry.type === 'refund' ? `退款 · ${category.name}` : category?.name,account].filter(Boolean).join(' · ');
   const symbol = entry.type === 'expense' ? '−' : entry.type === 'transfer' ? '' : '+';
   const mark = entry.type === 'transfer' ? icon('transfer') : esc(groupOf(book,category.group).icon);
   return `<button class="transaction" type="button" data-action="entry" data-id="${entry.id}">
@@ -137,7 +146,7 @@ function budgetRow(book,budget,monthEntries,edit=false) {
     <div class="progress${percent>100?' over':''}" role="meter" aria-label="${labelText}使用比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0,Math.min(100,Math.round(percent)))}"><span style="width:${Math.max(0,Math.min(100,percent))}%"></span></div>
     <div class="budget-foot"><span class="${remaining<0?'negative':''} number">${remaining<0?'超出':'剩余'} ${money(Math.abs(remaining))}</span>${edit?button('编辑','budget','neutral',budget.id):`<span>${Math.round(percent)}%</span>`}</div></div>`;
 }
-const latest = entries => [...entries].sort((a,b) => b.date.localeCompare(a.date) || 0);
+const latest = entries => entries.sort(newestFirst);
 const monthly = (book,month) => book.entries.filter(entry => entry.date.startsWith(month));
 
 function monthOverview(book,ui) {
@@ -200,7 +209,7 @@ export function filtered(book, ui) {
     (!f.type || entry.type===f.type) &&
     (!f.account || [entry.account,entry.to].includes(f.account)) &&
     (!f.group || categoryOf(book,entry.category)?.group===f.group) &&
-    (!query || [entry.note,categoryLabel(book,entry.category),accountOf(book,entry.account)?.name,accountOf(book,entry.to)?.name,(entry.amount/100).toFixed(2), String(entry.amount/100),entry.date]
+    (!query || [entry.note,categoryLabel(book,entry.category),accountOf(book,entry.account)?.name,accountOf(book,entry.to)?.name,(entry.amount/100).toFixed(2), String(entry.amount/100),dateAndTime(entry)]
       .some(item => String(item ?? '').toLowerCase().includes(query)))));
 }
 
@@ -220,7 +229,7 @@ export function recordsList(book,ui) {
 function records(book,ui) {
   const {query,type,account,group,all} = ui.filter;
   return header('明细','搜索、筛选和编辑账目',period(ui.month)) +
-    `<div class="inline-actions"><div class="segments"><button data-action="filter-scope" data-id="month" ${selected(all,false)}>所选月份</button><button data-action="filter-scope" data-id="all" ${selected(all,true)}>全部记录</button></div>${button('＋ 记一笔','new','primary')}${button('批量记账','batch','secondary')}</div>
+    `<div class="inline-actions"><div class="segments"><button data-action="filter-scope" data-id="month" ${selected(all,false)}>所选月份</button><button data-action="filter-scope" data-id="all" ${selected(all,true)}>全部记录</button></div>${button('＋ 记一笔','new','primary')}${button('批量记账','batch','secondary')}${button('账户转账','new','secondary','transfer')}</div>
       <div class="filter">
         <input id="filter-query" data-filter="query" aria-label="搜索备注、金额或分类" placeholder="搜索备注、金额或分类" value="${esc(query)}" type="search">
         <select data-filter="type" aria-label="收支类型">${option('','全部类型',type)+optionMap(types,type)}</select>
@@ -319,11 +328,11 @@ function debts(book) {
   ].map(([direction,title,remainingLabel,add])=>{
     const items=book.debts.filter(debt=>debt.direction===direction)
       .map(debt=>({debt,remaining:debtRemaining(debt)}))
-      .sort((a,b)=>Number(!a.remaining)-Number(!b.remaining) || b.debt.date.localeCompare(a.debt.date));
+      .sort((a,b)=>Number(!a.remaining)-Number(!b.remaining) || newestFirst(a.debt,b.debt));
     const total=items.reduce((sum,item)=>sum+item.remaining,0);
     const rows=items.map(({debt,remaining})=>`
       <button type="button" class="debt-row" data-action="debt-detail" data-id="${esc(debt.id)}">
-        <span><strong>${esc(debt.person)}</strong><small>${debt.date} · 本金 ${money(debt.amount)}</small></span>
+        <span><strong>${esc(debt.person)}</strong><small>${esc(dateAndTime(debt))} · 本金 ${money(debt.amount)}</small></span>
         <span class="debt-row-amount"><strong class="number">${money(remaining)}</strong><small>${remaining?remainingLabel:'已结清'}</small></span>
       </button>`).join('');
     return `<section class="panel">
