@@ -1,6 +1,7 @@
 import { types, accountTypes, frequencies } from './catalog.js';
 import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining, newestFirst, dateAndTime } from './store.js';
 import { occurrence } from './schedule.js';
+import { releases } from './releases.js';
 
 const glyphs = {
   overview:'<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>',
@@ -64,7 +65,7 @@ function setting(glyph,title,subtitle,action,target='') {
 }
 
 export function nav(page, mobile) {
-  const current = ['accounts','categories','files'].includes(page) ? 'settings' : page;
+  const current = ['accounts','categories','files','updates'].includes(page) ? 'settings' : page;
   const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''}>${icon(tab)}<span>${titles[tab]}</span></a>`;
   if (!mobile) return tabs.map(link).join('');
   return [link('overview'),link('records'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('reports'),link('debts'),link('settings')].join('');
@@ -290,8 +291,17 @@ function settings(book,ui) {
     </div></section>
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">
     ${setting('save','iPhone 安装与离线',ui.offlineReady?'离线资源已就绪':'查看安装和离线状态','offline-info')}
+    ${setting('records','版本更新','查看本次及历次改动','','#updates')}
     ${setting('guide','使用手册','安装、记账、预算和换机','', './guide/')}
     </div></section>`;
+}
+function updates() {
+  const items=releases.map(release=>`
+    <section class="panel release-entry">
+      <h2>${esc(release.version)} · ${esc(release.title)}</h2>
+      <ul>${release.changes.map(change=>`<li>${esc(change)}</li>`).join('')}</ul>
+    </section>`).join('');
+  return header('版本更新')+`<div class="summary-stack">${items}</div>`;
 }
 function accounts(book) {
   const result=balances(book,today());
@@ -346,4 +356,4 @@ function debts(book) {
     `<div class="top-grid debt-grid">${sections}</div>`;
 }
 
-export const pages = {overview,records,reports,plan,settings,accounts,categories,files,debts,months:monthOverview};
+export const pages = {overview,records,reports,plan,settings,accounts,categories,files,debts,updates,months:monthOverview};

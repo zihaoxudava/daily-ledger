@@ -3,6 +3,7 @@ import { today, shiftMonth, uid, money, parseMoney, readBook, writeBook, applyRe
   validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
+import { releases } from './releases.js';
 import { pages, nav, esc, icon, option, optionMap, label, dateInput, timeInput, amountInput, textInput,
   categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth } from './views.js';
 
@@ -13,7 +14,9 @@ const dialogContent = $('#dialog-content');
 const categoryDialog = $('#quick-category');
 const fileInput = $('#file-input');
 const toast = $('#toast');
-const appVersion = '1.4.0';
+const [currentRelease] = releases;
+const appVersion = currentRelease.version;
+const releaseSeenKey = 'daily-ledger-seen-release';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
@@ -36,6 +39,7 @@ function route(resetScroll=false) {
   const hash = location.hash.slice(1);
   page = Object.hasOwn(pages,hash) ? hash : 'overview';
   render();
+  if (page==='updates') markReleaseSeen();
   if (resetScroll) scrollTo(0,0);
 }
 
@@ -409,6 +413,7 @@ function openOffline() {
     <p>当前版本 <strong>${appVersion}</strong></p>
     <button type="button" class="button secondary" data-action="check-update">检查更新</button>
     <p id="update-status" aria-live="polite" hidden></p>
+    <button type="button" class="button neutral" data-action="show-releases">版本更新</button>
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
 }
 
@@ -685,6 +690,11 @@ const actions = {
   close:()=>{ if (!busy) dialog.close(); },
   reload:()=>location.reload(),
   'check-update':()=>checkUpdate(true),
+  'show-releases':()=>{
+    dialog.close();
+    location.hash='updates';
+  },
+  'dismiss-release':markReleaseSeen,
   'ask-delete':askDelete,
   'offline-info':openOffline,
   'pick-csv':()=>chooseFile('csv'),
@@ -803,8 +813,20 @@ function offlineStatus() {
 }
 const workers = navigator.serviceWorker;
 const updateNotice = $('#update-notice');
+const releaseNotice = $('#release-notice');
+let seenRelease;
+try { seenRelease=localStorage.getItem(releaseSeenKey); }
+catch {}
 let lastController = workers?.controller;
 let registrationJob, updateJob, lastUpdateCheck=0, updateReady=false;
+
+function markReleaseSeen() {
+  if (seenRelease===appVersion) return;
+  seenRelease=appVersion;
+  releaseNotice.hidden=true;
+  try { localStorage.setItem(releaseSeenKey,appVersion); }
+  catch {}
+}
 
 function updateStatus(message) {
   const messageLine=$('#update-status');
@@ -851,6 +873,7 @@ workers?.addEventListener('controllerchange',()=>{
   if (lastController && workers.controller && workers.controller!==lastController) {
     updateReady=true;
     if (updateNotice) updateNotice.hidden=false;
+    releaseNotice.hidden=true;
     updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
   }
   lastController=workers.controller;
@@ -862,6 +885,8 @@ window.addEventListener('online',()=>{
   checkUpdate();
 });
 window.addEventListener('offline',offlineStatus);
+$('#release-summary').textContent=`${appVersion} · ${currentRelease.title}`;
+releaseNotice.hidden=seenRelease===appVersion;
 offlineStatus();
 route();
 refresh(true);

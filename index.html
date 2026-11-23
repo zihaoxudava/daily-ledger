@@ -28,6 +28,10 @@
     <span role="status">新版已就绪</span>
     <button type="button" class="button secondary" data-action="reload">立即更新</button>
   </div>
+  <aside class="update-notice release-notice" id="release-notice" aria-label="本次版本更新" hidden>
+    <span><strong id="release-summary"></strong><a href="#updates">查看更新</a></span>
+    <button class="icon-button" type="button" data-action="dismiss-release" aria-label="关闭更新提示">×</button>
+  </aside>
   <main id="content" class="workspace" aria-busy="true">
     <section class="panel system-message"><h1>正在打开账本…</h1><p>请稍候。</p></section>
   </main>
