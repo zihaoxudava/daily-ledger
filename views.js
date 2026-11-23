@@ -21,6 +21,8 @@ const glyphs = {
   save:'<path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/>',
   upload:'<path d="M12 16V4m-4 4 4-4 4 4M4 15v5h16v-5"/>',
   guide:'<path d="M4 5h7l1 2 1-2h7v14h-7l-1 1-1-1H4Zm8 2v12"/>',
+  phone:'<path d="M20 16.2v2.5a2 2 0 0 1-2.2 2c-7.5-.8-13.7-7-14.5-14.5a2 2 0 0 1 2-2.2h2.5a2 2 0 0 1 2 1.7l.5 2.7a2 2 0 0 1-.6 1.8l-1.1 1.1a13 13 0 0 0 4.1 4.1l1.1-1.1a2 2 0 0 1 1.8-.6l2.7.5a2 2 0 0 1 1.7 2Z"/>',
+  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>',
   left:'<path d="m14 7-5 5 5 5"/>',
   right:'<path d="m10 7 5 5-5 5"/>',
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
@@ -293,6 +295,10 @@ function settings(book,ui) {
     ${setting('save','iPhone 安装与离线',ui.offlineReady?'离线资源已就绪':'查看安装和离线状态','offline-info')}
     ${setting('records','版本更新','查看本次及历次改动','','#updates')}
     ${setting('guide','使用手册','安装、记账、预算和换机','', './guide/')}
+    </div></section>
+    <section class="panel section-gap">${panelHead('联系开发者')}<div class="setting-grid">
+    ${setting('phone','手机号','17630276688','','tel:17630276688')}
+    ${setting('mail','QQ 邮箱','xzh8868927@qq.com','','mailto:xzh8868927@qq.com')}
     </div></section>`;
 }
 function updates() {

@@ -1,5 +1,13 @@
 export const releases = [
   {
+    version:'1.4.2',
+    title:'新增开发者联系方式',
+    changes:[
+      '「更多」页新增「联系开发者」，可点击手机号拨号。',
+      '点击 QQ 邮箱即可通过邮件反馈问题或建议。',
+    ],
+  },
+  {
     version:'1.4.1',
     title:'新增版本更新记录',
     changes:[
