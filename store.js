@@ -1,10 +1,12 @@
 import { defaultGroups, defaultCategories, defaultAccounts, debtDirections, accountTypes, frequencies, tobaccoCategory } from './catalog.js';
 import { occurrence } from './schedule.js';
+import { attachmentIndex, requireAttachment } from './attachments.js';
 
 export const MAX_AMOUNT = 9_999_999_999;
 const DB = 'daily-ledger';
 const STORE = 'book';
 const KEY = 'ledger';
+const attachmentKey = id => `attachment:${id}`;
 const MAX_CATEGORIES = 2000;
 let opening;
 
@@ -143,7 +145,47 @@ export async function readBook() {
   });
 }
 
-export async function writeBook(change) {
+export async function readAttachment(item) {
+  const database=await connect();
+  return new Promise((resolve,reject)=>{
+    const request=database.transaction(STORE).objectStore(STORE).get(attachmentKey(item.id));
+    request.onsuccess=()=>{
+      try { resolve(new Blob([requireAttachment(request.result,item)],{type:item.type})); }
+      catch (error) { reject(error); }
+    };
+    request.onerror=()=>reject(request.error);
+  });
+}
+
+export async function readBackup() {
+  const database=await connect();
+  return new Promise((resolve,reject)=>{
+    const transaction=database.transaction(STORE);
+    const store=transaction.objectStore(STORE);
+    const request=store.get(KEY);
+    const files=new Map();
+    let book;
+    let error;
+    request.onsuccess=()=>{
+      try {
+        book=withDefaults(request.result ?? initial());
+        for (const [id,item] of attachmentIndex(book)) {
+          const attachment=store.get(attachmentKey(id));
+          attachment.onsuccess=()=>{
+            try { files.set(id,new Blob([requireAttachment(attachment.result,item)],{type:item.type})); }
+            catch (cause) { error=cause; transaction.abort(); }
+          };
+        }
+      } catch (cause) { error=cause; transaction.abort(); }
+    };
+    transaction.oncomplete=()=>resolve({book,files});
+    transaction.onabort=()=>reject(error ?? transaction.error ?? new Error('读取备份中断，请重试。'));
+  });
+}
+
+export async function writeBook(change,files=new Map()) {
+  const buffers=new Map();
+  for (const [id,file] of files) buffers.set(id,file instanceof Blob ? await file.arrayBuffer() : file);
   const database = await connect();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE,'readwrite');
@@ -153,7 +195,17 @@ export async function writeBook(change) {
     request.onsuccess = () => {
       try {
         const current = withDefaults(request.result ?? initial());
+        const before = attachmentIndex(current);
         result = validate(change(current) ?? current);
+        const after = attachmentIndex(result);
+        for (const [id,item] of after) {
+          if (buffers.has(id) || !before.has(id)) {
+            store.put(requireAttachment(buffers.get(id),item),attachmentKey(id));
+          }
+        }
+        for (const id of before.keys()) {
+          if (!after.has(id)) store.delete(attachmentKey(id));
+        }
         store.put(result, KEY);
       } catch (cause) {
         error = cause;
@@ -161,7 +213,11 @@ export async function writeBook(change) {
       }
     };
     transaction.oncomplete = () => resolve(result);
-    transaction.onabort = () => reject(error ?? transaction.error ?? new Error('保存中断，请重试。'));
+    transaction.onabort = () => {
+      const cause=error ?? transaction.error;
+      reject(cause?.name==='QuotaExceededError' ? new Error('本机空间不足，请移除附件或释放存储后重试。') :
+        cause ?? new Error('保存中断，请重试。'));
+    };
   });
 }
 

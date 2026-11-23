@@ -23,6 +23,7 @@ const glyphs = {
   guide:'<path d="M4 5h7l1 2 1-2h7v14h-7l-1 1-1-1H4Zm8 2v12"/>',
   phone:'<path d="M20 16.2v2.5a2 2 0 0 1-2.2 2c-7.5-.8-13.7-7-14.5-14.5a2 2 0 0 1 2-2.2h2.5a2 2 0 0 1 2 1.7l.5 2.7a2 2 0 0 1-.6 1.8l-1.1 1.1a13 13 0 0 0 4.1 4.1l1.1-1.1a2 2 0 0 1 1.8-.6l2.7.5a2 2 0 0 1 1.7 2Z"/>',
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>',
+  photo:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m3 17 5-4 3 2 4-5 6 6"/>',
   left:'<path d="m14 7-5 5 5 5"/>',
   right:'<path d="m10 7 5 5-5 5"/>',
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
@@ -42,10 +43,8 @@ const button = (text, action, type='secondary', id='') =>
   `<button type="button" class="button ${type}" data-action="${action}"${id ? ` data-id="${esc(id)}"` : ''}>${text}</button>`;
 export const option = (id,label,chosen) => `<option value="${esc(id)}"${isSelected(id,chosen)}>${esc(label)}</option>`;
 export const label = (text, content, cls='') => `<label class="field ${cls}"><span>${text}</span>${content}</label>`;
-export const dateInput = (name, date, required = true) =>
-  `<input type="date" name="${name}" value="${esc(date)}" min="2000-01-01" max="2099-12-31"${required?' required':''}>`;
-export const timeInput = (name, time='') =>
-  `<input type="time" name="${name}" value="${esc(time)}">`;
+export const dateInput = (name, date, required = true, id='') =>
+  `<input type="date" name="${name}"${id?` id="${id}"`:''} value="${esc(date)}" min="2000-01-01" max="2099-12-31"${required?' required':''}>`;
 export const amountInput = (amount, required = true) =>
   `<input name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${amount == null ? '' : (amount/100).toFixed(2)}"${required?' required':''}>`;
 export const textInput = (name, text, limit, required=false, placeholder='') =>
@@ -111,7 +110,8 @@ export function entryRow(book, entry) {
   const title = entry.note || (entry.type === 'transfer' ? '账户转账' : category.name);
   const from = accountOf(book,entry.account).name;
   const account = entry.to ? `${from} → ${accountOf(book,entry.to).name}` : from;
-  const details = [fmtDate(entry.date),entry.time,entry.type === 'refund' ? `退款 · ${category.name}` : category?.name,account].filter(Boolean).join(' · ');
+  const details = [fmtDate(entry.date),entry.time,entry.type === 'refund' ? `退款 · ${category.name}` : category?.name,account,
+    entry.attachments?.length ? `${entry.attachments.length} 个附件` : ''].filter(Boolean).join(' · ');
   const symbol = entry.type === 'expense' ? '−' : entry.type === 'transfer' ? '' : '+';
   const mark = entry.type === 'transfer' ? icon('transfer') : esc(groupOf(book,category.group).icon);
   return `<button class="transaction" type="button" data-action="entry" data-id="${entry.id}">
@@ -282,7 +282,7 @@ function plan(book,ui) {
     ${rules || empty('plan','暂无周期账单','适用于房租、会员、工资和分期。到期后打开账本时入账。')}</section></div>`;
 }
 
-function settings(book,ui) {
+function settings() {
   return header('更多','管理账户、分类与本机数据')+`
     <section class="panel">${panelHead('账本管理')}<div class="setting-grid">
     ${setting('wallet','账户','余额、期初金额和账户归档','','#accounts')}
@@ -292,7 +292,7 @@ function settings(book,ui) {
     ${setting('file','数据与备份','完整备份、CSV 和恢复','','#files')}
     </div></section>
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">
-    ${setting('save','iPhone 安装与离线',ui.offlineReady?'离线资源已就绪':'查看安装和离线状态','offline-info')}
+    ${setting('save','安装到桌面','手机、平板和电脑 · 支持离线','offline-info')}
     ${setting('records','版本更新','查看本次及历次改动','','#updates')}
     ${setting('guide','使用手册','安装、记账、预算和换机','', './guide/')}
     </div></section>

@@ -1,10 +1,12 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
-import { today, shiftMonth, uid, money, parseMoney, readBook, writeBook, applyRecurring, hasDueRecurring, validate,
+import { today, shiftMonth, uid, money, parseMoney, readBook, readBackup, writeBook, applyRecurring, hasDueRecurring, validate,
   validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
-import { pages, nav, esc, icon, option, optionMap, label, dateInput, timeInput, amountInput, textInput,
+import { buildBackup, restoreAttachmentFiles, maxBackupBytes } from './attachments.js';
+import { noteFields, noteDraft, mountNote, readNote } from './note.js';
+import { pages, nav, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
   categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth } from './views.js';
 
 const $ = selector => document.querySelector(selector);
@@ -25,6 +27,8 @@ const ui = {
 const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
 let pendingRefresh=0, refreshing=false;
+let installPrompt;
+const isInstalled=()=>matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
 
@@ -134,18 +138,40 @@ function entryFields(type, fields={}, prefix='') {
   const category = type!=='transfer'
     ? `<div class="field entry-category">
         <div class="category-caption">
-          <label for="${prefix}entry-category">${type==='refund' ? '原支出分类' : '分类'}</label>
+          <label for="${prefix}entry-category">分类</label>
           <button type="button" class="link-button" data-action="quick-category" data-id="${prefix}entry-category">＋ 添加分类</button>
         </div>
-        <select id="${prefix}entry-category" name="${prefix}category" data-entry-category="${type}" required>${categoryOptions(book,type,fields.category)}</select>
+        <select id="${prefix}entry-category" name="${prefix}category" data-entry-category="${type}" required>${categoryOptions(book,type,fields.category,type==='refund'?'请选择原支出分类':'请选择分类')}</select>
       </div>`
     : '';
-  return `<div class="field-row entry-accounts">${label(type==='transfer'?'转出账户':'账户',`<select name="${prefix}account" required>${accountOptions(book,fields.account,'请选择账户')}</select>`)}
+  return `<div class="field-row entry-accounts${category?' has-category':''}">${label(type==='transfer'?'转出账户':'账户',`<select name="${prefix}account" required>${accountOptions(book,fields.account,'请选择账户')}</select>`)}
   ${type==='transfer' ? label('转入账户',`<select name="${prefix}to" required>${accountOptions(book,fields.to,'请选择账户',fields.account)}</select>`) : category}</div>`;
 }
 
+function optionalTimeField(name,time='') {
+  return `<div class="field optional-time">
+    <div class="time-caption"><label for="${name}-input">时间</label><button type="button" class="link-button" data-action="clear-time"${time?'':' hidden'}>不填</button></div>
+    <button type="button" class="time-placeholder" data-action="set-time"${time?' hidden':''}><span>不填</span><span>设置时间</span></button>
+    <input id="${name}-input" type="time" name="${name}" value="${esc(time)}" required${time?'':' disabled hidden'}>
+  </div>`;
+}
+
+function toggleTime(button,enabled) {
+  const field=button.closest('.optional-time');
+  const input=field.querySelector('input');
+  const placeholder=field.querySelector('[data-action="set-time"]');
+  field.querySelector('[data-action="clear-time"]').hidden=!enabled;
+  placeholder.hidden=enabled;
+  input.hidden=input.disabled=!enabled;
+  if (enabled) input.focus();
+  else {
+    input.value='';
+    placeholder.focus();
+  }
+}
+
 function dateFields(date,time,labelText='日期') {
-  return `<div class="field-row">${label(labelText,dateInput('date',date))}${label('时间（选填）',timeInput('time',time))}</div>`;
+  return `<div class="field-row date-time-fields">${label(labelText,dateInput('date',date))}${optionalTimeField('time',time)}</div>`;
 }
 
 function openEntry(record, type='expense') {
@@ -160,8 +186,9 @@ function openEntry(record, type='expense') {
     ${label('金额（人民币）',amountInput(record?.amount),'form-amount')}
     <div id="entry-fields">${entryFields(type,defaults)}</div>
     ${dateFields(record?.date ?? today(),record?.time)}
-    ${label('备注',textInput('note',record?.note ?? '',160,false,'商家、用途或其他说明'))}`;
+    ${noteFields('note',record?.note)}`;
   modalFrame(state,record?'编辑账目':'记一笔',html,(record ? remove('删除') : cancel)+submit('保存账目'));
+  mountNote(dialog,record?.attachments);
 }
 
 const batchRows = () => [...dialog.querySelectorAll('[data-batch-row]')];
@@ -209,13 +236,13 @@ function appendBatchRow(fields={}, focus=false) {
         ${label('账目类型',`<select name="${prefix}type">${optionMap(types,type)}</select>`)}
       </div>
       <div class="batch-fields">${entryFields(type,fields,prefix)}</div>
-      <div class="field-row">
-        ${label('时间（选填）',timeInput(prefix+'time',fields.time))}
-        ${label('备注',textInput(prefix+'note',fields.note ?? '',160,false,'选填'))}
-      </div>
+      ${optionalTimeField(prefix+'time',fields.time)}
+      ${noteFields(prefix+'note',fields.note)}
     </section>`);
+  const row=$(`[data-batch-row="${id}"]`);
+  mountNote(row,undefined,fields.noteDraft);
   updateBatchCount();
-  if (focus) rowControl($(`[data-batch-row="${id}"]`),'amount').focus();
+  if (focus) rowControl(row,'amount').focus();
 }
 
 function openBatch() {
@@ -229,14 +256,18 @@ function openBatch() {
     to:draft?.get('to'),
     note:draft?.get('note'),
     time:draft?.get('time'),
+    noteDraft:draft ? noteDraft(dialog) : undefined,
   };
   modalFrame({kind:'batch',nextRow:1},'批量记账',`
     <div class="batch-date">
-      ${label('统一日期',dateInput('date',date))}
-      <div class="batch-date-actions">
-        <button type="button" class="button neutral" data-action="batch-date" data-id="0">今天</button>
-        <button type="button" class="button neutral" data-action="batch-date" data-id="-1">昨天</button>
+      <div class="batch-date-heading">
+        <label for="batch-date-input">统一日期</label>
+        <div class="batch-date-actions">
+          <button type="button" class="button neutral" data-action="batch-date" data-id="0">今天</button>
+          <button type="button" class="button neutral" data-action="batch-date" data-id="-1">昨天</button>
+        </div>
       </div>
+      ${dateInput('date',date,true,'batch-date-input')}
     </div>
     <div id="batch-rows" class="batch-rows"></div>`,
   '<button type="button" class="button secondary" data-action="add-batch-row">＋ 再加一笔</button><button type="submit" class="button primary" id="batch-submit">保存</button>');
@@ -258,9 +289,10 @@ function openDebt(debt,direction) {
     ${label('对方姓名',textInput('person',debt?.person ?? '',40,true,'姓名或称呼'))}
     ${label('本金（元）',amountInput(debt?.amount),'form-amount')}
     ${dateFields(debt?.date ?? today(),debt?.time,'借款日期')}
-    ${label('备注',textInput('note',debt?.note ?? '',160,false,'选填'))}`;
+    ${noteFields('note',debt?.note)}`;
   modalFrame({kind:'debt',id:debt?.id},debt?'编辑借款':initialDirection==='lent'?'新增借出':'新增借入',
     html,(debt?remove('删除'):cancel)+submit('保存借款'));
+  mountNote(dialog,debt?.attachments);
 }
 
 function openDebtDetail(debt) {
@@ -269,7 +301,8 @@ function openDebtDetail(debt) {
   const payLabel=lent?'记收款':'记还款';
   const repayments=[...debt.payments].reverse().sort(newestFirst).map(payment=>`
     <button type="button" class="debt-row" data-action="edit-debt-payment" data-id="${esc(payment.id)}">
-      <span><strong>${esc(dateAndTime(payment))}</strong>${payment.note?`<small>${esc(payment.note)}</small>`:''}</span>
+      <span><strong>${esc(dateAndTime(payment))}</strong>${payment.note?`<small>${esc(payment.note)}</small>`:''}
+      ${payment.attachments?.length?`<small>${payment.attachments.length} 个附件</small>`:''}</span>
       <span class="debt-row-amount"><strong class="number">${money(payment.amount)}</strong></span>
     </button>`).join('');
   const html=`<p>${debtDirections[debt.direction]} · ${esc(dateAndTime(debt))}</p>
@@ -279,10 +312,12 @@ function openDebtDetail(debt) {
       <div><dt>${remaining?(lent?'待收回':'待归还'):'已结清'}</dt><dd class="number">${money(remaining)}</dd></div>
     </dl>
     ${debt.note?`<p class="debt-note">${esc(debt.note)}</p>`:''}
+    ${debt.attachments?.length?'<div class="note-field"><ul class="attachment-list"></ul><p class="error" role="alert" hidden></p></div>':''}
     <div><h3>${lent?'收款记录':'还款记录'}</h3>${repayments||'<p class="debt-empty">暂无记录</p>'}</div>`;
   const edit=`<button type="button" class="button neutral" data-action="edit-debt" data-id="${esc(debt.id)}">编辑借款</button>`;
   const pay=`<button type="button" class="button primary" data-action="new-debt-payment" data-id="${esc(debt.id)}">${payLabel}</button>`;
   modalFrame({kind:'info',debtId:debt.id},esc(debt.person),html,edit+(remaining?pay:submit('完成')));
+  if (debt.attachments?.length) mountNote(dialog,debt.attachments);
 }
 
 function openDebtPayment(debt,payment) {
@@ -292,9 +327,10 @@ function openDebtPayment(debt,payment) {
   const html=`<p>${esc(debt.person)} · ${lent?'本次最多可收回':'本次最多可归还'} ${money(available)}</p>
     ${label('金额（元）',amountInput(payment?.amount),'form-amount')}
     ${dateFields(payment?.date ?? (debt.date>todayDate?debt.date:todayDate),payment?.time)}
-    ${label('备注',textInput('note',payment?.note ?? '',160,false,'选填'))}`;
+    ${noteFields('note',payment?.note)}`;
   modalFrame({kind:'debt-payment',debtId:debt.id,id:payment?.id},payment?'编辑还款记录':lent?'记收款':'记还款',
     html,(payment?remove('删除'):cancel)+submit('保存'));
+  mountNote(dialog,payment?.attachments);
 }
 
 function openBudget(budget) {
@@ -405,16 +441,34 @@ function openRule(rule) {
 }
 
 function openOffline() {
-  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const standalone = isInstalled();
   const status = ui.offlineReady ? '离线资源已就绪。' : '离线资源还在准备中。请保持联网，重新打开本页后查看状态。';
-  modalFrame({kind:'info'},'iPhone 安装与离线',`<p>${status}</p>
-    <p>${standalone?'你已从主屏幕打开账本。':'在 Safari 打开账本，轻点「共享」→「添加到主屏幕」，打开「作为网页 App 打开」（如有），然后轻点「添加」。'}</p>
-    <p>安装后先从图标联网打开一次，再开启飞行模式试记一笔。换机前请到「更多」→「数据与备份」导出 JSON。</p>
+  modalFrame({kind:'info'},'安装到桌面',`<p>${status}${standalone?' 已在独立窗口打开。':''}</p>
+    <button type="button" id="install-app" class="button primary" data-action="install-app"${installPrompt && !standalone?'':' hidden'}>安装日常账本</button>
+    ${standalone?'':`<ul class="install-steps">
+      <li><strong>iPhone / iPad</strong> 在 Safari 点「共享 → 添加到主屏幕」，开启「作为网页 App 打开」（如有）。</li>
+      <li><strong>安卓 Chrome</strong> 打开右上角菜单，点「安装应用」或「添加到主屏幕」。</li>
+      <li><strong>三星手机</strong> 也可在 Samsung Internet 点地址栏的安装图标，或从菜单添加到主屏幕。</li>
+      <li><strong>Windows / Linux</strong> 用 Chrome 或 Edge 安装网页 App，可创建桌面快捷方式。</li>
+      <li><strong>Mac</strong> 用 Chrome 安装，或在 macOS 14 及以上用 Safari「文件 → 添加到程序坞」。</li>
+    </ul>`}
+    <p>安装后先从图标联网打开一次。显示「离线可用」后就能断网记账。跨设备可通过 JSON 备份迁移。</p>
     <p>当前版本 <strong>${appVersion}</strong></p>
-    <button type="button" class="button secondary" data-action="check-update">检查更新</button>
-    <p id="update-status" aria-live="polite" hidden></p>
+    <p>联网时会自动检查更新。新版就绪后，页面顶部会出现「立即更新」。</p>
     <button type="button" class="button neutral" data-action="show-releases">版本更新</button>
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
+}
+
+async function installApp() {
+  if (!installPrompt) return;
+  const prompt=installPrompt;
+  installPrompt=undefined;
+  $('#install-app').hidden=true;
+  await prompt.prompt();
+  if ((await prompt.userChoice).outcome==='accepted') {
+    dialog.close();
+    tell('已确认安装，请从桌面或主屏幕打开。');
+  }
 }
 
 function setEntryType(type) {
@@ -435,8 +489,8 @@ function must(condition,message) {
   if (!condition) throw new Error(message);
 }
 
-async function commit(change, message, afterWrite) {
-  book=await writeBook(change);
+async function commit(change, message, afterWrite, files) {
+  book=await writeBook(change,files);
   afterWrite?.();
   channel?.postMessage('change');
   dialog.close();
@@ -444,12 +498,12 @@ async function commit(change, message, afterWrite) {
   if (message) tell(message);
 }
 
-function makeEntry(current, type, get, date, id=uid()) {
+function makeEntry(current, type, get, date, note, id=uid()) {
   must(validDate(date),'请填写有效日期。');
   must(Object.hasOwn(types,type),'请选择账目类型。');
   const transfer=type==='transfer';
   const item={id,type,amount:parseMoney(get('amount')),date,account:get('account'),
-    to:transfer?get('to'):'',category:transfer?'':get('category'),note:get('note'),...optionalTime(get)};
+    to:transfer?get('to'):'',category:transfer?'':get('category'),...note,...optionalTime(get)};
   must(accountOf(current,item.account),'请选择账户。');
   if (transfer) must(accountOf(current,item.to) && item.account!==item.to,'请选择不同的转入和转出账户。');
   else must(categoryOf(current,item.category),'请选择分类。');
@@ -463,28 +517,28 @@ function optionalTime(get) {
 }
 
 const save = {
-  entry(current,s,get) {
-    const item=makeEntry(current,s.type,get,get('date'),s.id);
+  entry(current,s,get,note) {
+    const item=makeEntry(current,s.type,get,get('date'),note,s.id);
     if (s.id) must(current.entries.some(e=>e.id===s.id),'这笔账目已在其他窗口移除。');
     upsert(current.entries,item);
   },
-  debt(current,s,get) {
+  debt(current,s,get,note) {
     const existing=debtOf(current,s.id);
     if (s.id) must(existing,'这项借款已被移除。');
     const debt={id:s.id ?? uid(),direction:get('direction'),person:get('person'),amount:parseMoney(get('amount')),
-      date:get('date'),note:get('note'),payments:existing?.payments ?? [],...optionalTime(get)};
+      date:get('date'),payments:existing?.payments ?? [],...note,...optionalTime(get)};
     must(debt.person,'请填写对方姓名。');
     must(validDate(debt.date),'请填写有效日期。');
     must(debtRemaining(debt)>=0,'本金不能小于已记录的还款金额。');
     must(debt.payments.every(payment=>payment.date>=debt.date),'借款日期不能晚于已记录的还款日期。');
     upsert(current.debts,debt);
   },
-  'debt-payment'(current,s,get) {
+  'debt-payment'(current,s,get,note) {
     const debt=debtOf(current,s.debtId);
     must(debt,'这项借款已被移除。');
     const previous=debt.payments.find(payment=>payment.id===s.id);
     if (s.id) must(previous,'这笔还款已被移除。');
-    const payment={id:s.id ?? uid(),amount:parseMoney(get('amount')),date:get('date'),note:get('note'),...optionalTime(get)};
+    const payment={id:s.id ?? uid(),amount:parseMoney(get('amount')),date:get('date'),...note,...optionalTime(get)};
     must(validDate(payment.date) && payment.date>=debt.date,'请填写有效日期，且不早于借款日期。');
     must(payment.amount<=debtRemaining(debt)+(previous?.amount ?? 0),'金额不能超过这项借款的剩余金额。');
     upsert(debt.payments,payment);
@@ -566,7 +620,7 @@ async function submitModal(event) {
         owner[state.collection]=owner[state.collection].filter(item=>item.id!==state.id);
       },'已删除');
     } else if (state.kind==='restore') {
-      await commit(() => validate(state.data),'已恢复完整备份');
+      await commit(()=>state.data,'已恢复完整备份',undefined,state.files);
     } else if (state.kind==='csv') {
       let summary;
       await commit(current=>{ summary=importCSV(current,state.raw); });
@@ -574,20 +628,26 @@ async function submitModal(event) {
     } else if (state.kind==='batch') {
       const date=get('date');
       must(validDate(date),'请选择有效的统一日期。');
-      const rows=batchRows().map(rowPrefix);
+      const files=new Map();
+      const rows=batchRows().map(row=>{
+        const prefix=rowPrefix(row);
+        const field=key=>get(prefix+key);
+        return {field,note:readNote(row,field('note'),files)};
+      });
       await commit(current=>{
-        const entries=rows.map((prefix,index)=>{
-          const field=key=>get(prefix+key);
-          try { return makeEntry(current,field('type'),field,date); }
+        const entries=rows.map(({field,note},index)=>{
+          try { return makeEntry(current,field('type'),field,date,note); }
           catch (error) { throw new Error(`第 ${index+1} 笔：${showError(error)}`); }
         });
         current.entries.push(...entries);
       },`已保存 ${rows.length} 笔`,()=>{
         ui.month=date.slice(0,7);
         ui.limit=50;
-      });
+      },files);
     } else {
-      await commit(current=>save[state.kind](current,state,get),'已保存');
+      const files=new Map();
+      const note=noteDraft(dialog) ? readNote(dialog,get('note'),files) : undefined;
+      await commit(current=>save[state.kind](current,state,get,note),'已保存',undefined,files);
     }
   } catch (error) {
     errorInModal(showError(error));
@@ -609,7 +669,8 @@ async function inspectFile() {
   const file=fileInput.files[0];
   if (!file || !book) return;
   try {
-    if (file.size>25_000_000) throw new Error('文件超过 25 MB，请分批导入 CSV。');
+    if (fileMode==='csv' && file.size>25_000_000) throw new Error('文件超过 25 MB，请分批导入 CSV。');
+    if (fileMode==='backup' && file.size>maxBackupBytes) throw new Error('备份文件超过 160 MB。');
     const raw=await file.text();
     if (fileMode==='csv') {
       const preview=structuredClone(book);
@@ -617,11 +678,14 @@ async function inspectFile() {
       validate(preview);
       modalFrame({kind:'csv',raw},'确认导入 CSV',`<p>${esc(file.name)}</p><p>将新增 ${added} 笔，跳过 ${skipped} 笔已有编号的记录。文件中出现的新账户和分类会自动建立。</p>`,cancel+submit('导入'));
     } else {
-      let data;
-      try { data=validate(JSON.parse(raw)); }
-      catch (error) { throw new Error(error instanceof SyntaxError?'文件不是有效的 JSON 备份。':showError(error)); }
-      modalFrame({kind:'restore',data},'确认恢复备份',`<p>${esc(file.name)}</p>
-        <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户和 ${data.budgets.length} 项预算。</p>
+      let parsed;
+      try { parsed=JSON.parse(raw); }
+      catch { throw new Error('文件不是有效的 JSON 备份。'); }
+      const {attachmentFiles,...contents}=parsed ?? {};
+      const data=validate(contents);
+      const files=restoreAttachmentFiles(data,attachmentFiles);
+      modalFrame({kind:'restore',data,files},'确认恢复备份',`<p>${esc(file.name)}</p>
+        <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户、${data.budgets.length} 项预算${files.size?`和 ${files.size} 个附件`:''}。</p>
         <p>恢复会替换当前账本的全部内容。需要保留当前账目时，请先取消并导出本机备份。</p>`,cancel+submit('替换并恢复'));
     }
   } catch (error) {
@@ -689,7 +753,8 @@ const actions = {
   'load-more':()=>{ ui.limit+=50; renderRecordResults(); },
   close:()=>{ if (!busy) dialog.close(); },
   reload:()=>location.reload(),
-  'check-update':()=>checkUpdate(true),
+  'set-time':(_id,button)=>toggleTime(button,true),
+  'clear-time':(_id,button)=>toggleTime(button,false),
   'show-releases':()=>{
     dialog.close();
     location.hash='updates';
@@ -697,13 +762,18 @@ const actions = {
   'dismiss-release':markReleaseSeen,
   'ask-delete':askDelete,
   'offline-info':openOffline,
+  'install-app':installApp,
   'pick-csv':()=>chooseFile('csv'),
   'pick-backup':()=>chooseFile('backup'),
   'csv-template':()=>download('日常账本-导入模板.csv',csvTemplate(),'text/csv;charset=utf-8'),
-  backup:async()=>{
-    const fresh=await readBook();
-    download(`日常账本-备份-${today()}.json`,JSON.stringify(fresh,null,2),'application/json');
-    tell('备份下载已发起');
+  backup:async(_id,button)=>{
+    button.disabled=true;
+    try {
+      const {book,files}=await readBackup();
+      if (files.size) tell('正在打包账目与附件…');
+      download(`日常账本-备份-${today()}.json`,await buildBackup(book,files));
+      tell('备份下载已发起');
+    } finally { button.disabled=false; }
   },
   export:()=>download(`日常账本-全量-${today()}.csv`,exportCSV(book),'text/csv;charset=utf-8'),
   'export-filter':()=>download(`日常账本-筛选-${today()}.csv`,exportCSV(book,filtered(book,ui)),'text/csv;charset=utf-8'),
@@ -715,7 +785,7 @@ document.addEventListener('click',async event=>{
   const {action,id}=button.dataset;
   if (!book && !['reload','offline-info','close'].includes(action)) return;
   if (!Object.hasOwn(actions,action)) return;
-  try { await actions[action](id); }
+  try { await actions[action](id,button); }
   catch (error) { if (dialog.open) errorInModal(showError(error)); else tell(showError(error)); }
 });
 document.addEventListener('submit',submitModal);
@@ -787,6 +857,10 @@ categoryDialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault
 dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
 dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal.kind!=='batch') dialog.close(); });
 dialog.addEventListener('close',()=>{
+  if (!dialog.open) {
+    modal=undefined;
+    dialogContent.replaceChildren();
+  }
   flushRefresh();
   checkUpdate();
 });
@@ -828,44 +902,22 @@ function markReleaseSeen() {
   catch {}
 }
 
-function updateStatus(message) {
-  const messageLine=$('#update-status');
-  if (!messageLine) return;
-  messageLine.textContent=message;
-  messageLine.hidden=false;
-}
-
-async function checkUpdate(manual=false) {
-  if (!workers || !navigator.onLine) {
-    if (manual) updateStatus(workers?'联网后可检查更新。':'当前浏览器无法检查网页 App 更新。');
-    return;
-  }
-  if (updateReady) {
-    if (manual) updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
-    return;
-  }
-  if (!manual && (updateJob || Date.now()-lastUpdateCheck<60000)) return;
-  if (manual) updateStatus('正在检查更新…');
-  if (!updateJob) {
-    lastUpdateCheck=Date.now();
-    registrationJob ??= workers.register('./sw.js',{updateViaCache:'none'}).catch(error=>{
-      registrationJob=undefined;
-      throw error;
-    });
-    updateJob=registrationJob.then(async registration=>{
-      if (registration.active && !registration.installing && !registration.waiting) await registration.update();
-      return registration;
-    }).finally(()=>{updateJob=undefined;});
-  }
+async function checkUpdate() {
+  if (!workers || !navigator.onLine || updateReady || updateJob || Date.now()-lastUpdateCheck<60000) return;
+  lastUpdateCheck=Date.now();
+  registrationJob ??= workers.register('./sw.js',{updateViaCache:'none'}).catch(error=>{
+    registrationJob=undefined;
+    throw error;
+  });
+  updateJob=registrationJob.then(async registration=>{
+    if (registration.active && !registration.installing && !registration.waiting) await registration.update();
+  });
   try {
-    const registration=await updateJob;
-    if (manual) {
-      if (updateReady) updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
-      else if (registration.installing || registration.waiting) updateStatus('正在准备离线资源。');
-      else updateStatus('当前已是最新版本。');
-    }
+    await updateJob;
   } catch {
-    if (manual) updateStatus('暂时无法检查更新，请联网后再试。');
+    // A later foreground or online event retries the check.
+  } finally {
+    updateJob=undefined;
   }
 }
 
@@ -874,7 +926,6 @@ workers?.addEventListener('controllerchange',()=>{
     updateReady=true;
     if (updateNotice) updateNotice.hidden=false;
     releaseNotice.hidden=true;
-    updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
   }
   lastController=workers.controller;
   offlineStatus();
@@ -885,6 +936,21 @@ window.addEventListener('online',()=>{
   checkUpdate();
 });
 window.addEventListener('offline',offlineStatus);
+window.addEventListener('beforeinstallprompt',event=>{
+  if (isInstalled() || typeof event.prompt!=='function') return;
+  event.preventDefault();
+  installPrompt=event;
+  const button=$('#install-app');
+  if (dialog.open && button) button.hidden=false;
+});
+window.addEventListener('appinstalled',()=>{
+  installPrompt=undefined;
+  const button=$('#install-app');
+  if (button) button.hidden=true;
+});
+setInterval(()=>{
+  if (document.visibilityState==='visible' && !dialog.open) checkUpdate();
+},300_000);
 $('#release-summary').textContent=`${appVersion} · ${currentRelease.title}`;
 releaseNotice.hidden=seenRelease===appVersion;
 offlineStatus();

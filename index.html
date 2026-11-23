@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f4f6f3">
-  <meta name="description" content="在 iPhone 主屏幕离线记录收支、账户和预算。">
+  <meta name="description" content="可安装到手机、平板和电脑，离线记录收支、账户和预算。">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">
@@ -38,6 +38,11 @@
   <nav class="tabbar" id="tabbar" aria-label="主导航"></nav>
   <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
   <dialog id="quick-category" aria-labelledby="quick-category-title"></dialog>
+  <dialog id="attachment-preview" aria-labelledby="attachment-title">
+    <header class="modal-head"><h2 id="attachment-title"></h2><form method="dialog"><button class="icon-button" aria-label="关闭预览">×</button></form></header>
+    <div class="modal-body"><img alt="附件照片"><p class="error" hidden>无法预览这张照片，可以保存原文件查看。</p></div>
+    <footer class="modal-foot"><button type="button" class="button secondary" data-download>保存原文件</button></footer>
+  </dialog>
   <div class="toast" id="toast" role="status" hidden></div>
   <input type="file" id="file-input" hidden>
   <noscript><div class="system-message">日常账本需要开启 JavaScript。</div></noscript>

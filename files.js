@@ -113,7 +113,7 @@ export function importCSV(book, raw) {
 }
 
 export function download(name, content, type) {
-  const file = new Blob([content], {type});
+  const file = content instanceof Blob ? content : new Blob([content], {type});
   const url = URL.createObjectURL(file);
   const link = Object.assign(document.createElement('a'), {href:url,download:name});
   document.body.append(link);

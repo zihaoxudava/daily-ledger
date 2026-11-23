@@ -28,22 +28,25 @@
 </head>
 <body>
 <main>
-  <header><h1>日常账本使用手册</h1><p>iPhone 安装、离线记账、预算与换机</p>
+  <header><h1>日常账本使用手册</h1><p>手机和电脑安装、离线记账、预算与换机</p>
   <a class="launch" href="../">打开日常账本</a></header>
-  <section>
-    <h2>安装到 iPhone 主屏幕</h2>
-    <ol>
-      <li>用 <strong>Safari</strong> 打开上方链接即可使用日常账本。</li>
-      <li>轻点「共享」→「添加到主屏幕」。如果页面菜单收起了「共享」，先点页面菜单。看到「作为网页 App 打开」时将其开启，然后轻点「添加」。</li>
-      <li>回到主屏幕，从「日常账本」图标联网打开一次。等顶部显示「离线可用」后再断网测试。</li>
-      <li>可用飞行模式测试。开启后退出账本，从主屏幕图标重新打开并试记一笔。到「明细」核对，再删掉测试账目。</li>
-    </ol>
-    <p>请在主屏幕版建立正式账目。Safari 标签页与主屏幕版的本机数据可能各自保存，可以通过 JSON 备份迁移。</p>
+  <section id="install">
+    <h2>安装到桌面或主屏幕</h2>
+    <p>用系统浏览器打开账本，再到「更多 → 安装到桌面」。看到「安装日常账本」时可以直接点。也可以按设备使用浏览器菜单。</p>
+    <ul>
+      <li><strong>iPhone / iPad</strong>。用 Safari 点「共享 → 添加到主屏幕」。看到「作为网页 App 打开」时将其开启。<a href="https://support.apple.com/zh-cn/guide/iphone/iphea86e5236/27/ios/27">Apple 指南</a></li>
+      <li><strong>安卓手机和平板（含三星）</strong>。用 Chrome 打开右上角菜单，选「安装应用」或「添加到主屏幕」。<a href="https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&amp;hl=zh-Hans">Chrome 指南</a></li>
+      <li><strong>三星自带浏览器</strong>。在 Samsung Internet 点地址栏的安装图标，按提示安装。也可以在菜单里将网页添加到主屏幕。若图标先出现在应用列表，长按图标即可添加到主屏幕。<a href="https://developer.samsung.com/automation/v2-pwa-guide.html">三星安装指南</a></li>
+      <li><strong>Windows / Linux / Chromebook</strong>。在 Chrome 地址栏点安装图标，或在菜单选「投放、保存和分享 → 将网页安装为应用」。Windows 也可用 Edge 菜单「应用 → 将此站点作为应用安装」，再从 <code>edge://apps</code> 建立桌面快捷方式。<a href="https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DDesktop&amp;hl=zh-Hans">Chrome 指南</a> · <a href="https://support.microsoft.com/en-US/edge/install-manage-or-uninstall-apps-in-microsoft-edge">Edge 指南</a></li>
+      <li><strong>Mac</strong>。macOS 14 及以上可在 Safari 选「文件 → 添加到程序坞」，也可用 Chrome 安装。<a href="https://support.apple.com/zh-cn/104996">Apple 指南</a></li>
+    </ul>
+    <p>从新图标联网打开一次，等页面显示「离线可用」。换设备或从另一浏览器迁移账目时，请导出完整 JSON 后在目标账本恢复。</p>
   </section>
   <section>
     <h2>记一笔与查明细</h2>
     <ol>
-      <li>轻点底部「记一笔」，或在总览使用「支出」「收入」「转账」「退款」。填写金额、账户、日期和适用的分类，时间和备注可选。</li>
+      <li>轻点底部「记一笔」，或在总览使用「支出」「收入」「转账」「退款」。填写金额、账户、日期和适用的分类。时间默认「不填」，可点「设置时间」。已选时间时可点「不填」清除。</li>
+      <li>备注旁点「照片」或「文件」可加附件。保存后重新打开该账目可预览照片或保存原文件。每笔最多 6 个、单个最多 10 MB，整个账本附件合计最多 60 MB。</li>
       <li>「明细」顶部有「账户转账」。选转出和转入账户即可，例如银行卡转入支付宝。转账只改变账户余额。信用卡消费记支出，还款用转账转入信用卡。</li>
       <li>收到商家退款时选「退款」，用原支出的分类和实际收款账户，日期填到账日。当月净支出会扣减这笔退款。</li>
       <li>在「明细」按月份、类型、账户和分类组筛选，也能搜索备注或金额。点一条账目可编辑或删除，导出按钮只导出当前筛选结果。</li>
@@ -86,7 +89,7 @@
   <section>
     <h2>备份、恢复与 CSV</h2>
     <ol>
-      <li><strong>换机或卸载前备份</strong>。去「更多」→「数据与备份」→「导出完整备份」，把 JSON 保存到 iPhone「文件」或你选的备份位置。</li>
+      <li><strong>换机或卸载前备份</strong>。去「更多」→「数据与备份」→「导出完整备份」，把 JSON 保存到 iPhone「文件」或你选的备份位置。JSON 包含照片和文件，CSV 只包含流水和文字备注。</li>
       <li><strong>恢复完整账本</strong>。在目标设备打开同一 App，轻点「恢复备份」，选 JSON，核对笔数后确认。恢复会覆盖目标设备已有的账本。</li>
       <li><strong>导入流水</strong>。下载 CSV 模板，保留表头，保存为 UTF-8 CSV。日期用 <code>2026-11-23</code> 格式，时间可填 <code>18:30</code> 或留空。金额填正数，类型填「支出」「收入」「转账」或「退款」。转账填写转入账户并将两列分类留空，其余类型填分类组和分类，转入账户留空。</li>
       <li><strong>避免重复</strong>。由本 App 导出的同一笔账目的记录编号保持一致，重复导入会跳过。自己填模板时可用唯一编号；留空会按新账目导入。CSV 用于流水，完整的预算、规则和期初余额请用 JSON。</li>
@@ -96,14 +99,14 @@
     <h2>常见问题</h2>
     <ul>
       <li><strong>看不到离线可用</strong>。在主屏幕版保持联网，关闭后重新打开，确认已进入账本页面。安装或更新时需要联网。</li>
-      <li><strong>主屏幕打开还是旧版</strong>。保持联网，从已有的「日常账本」图标打开，稍等片刻，再从 App 切换器关闭并打开一次。进入新版后，可从顶部「离线可用」或「更多」里的「iPhone 安装与离线」查看版本并检查更新。出现「新版已就绪」时，点「立即更新」。</li>
+      <li><strong>打开后还是旧版</strong>。保持联网，从已有的「日常账本」图标打开，账本会自动检查更新。顶部出现「新版已就绪」时，点「立即更新」。当前版本可在「更多 → 安装到桌面」查看。</li>
       <li><strong>查看更新内容</strong>。打开新版时，点页面顶部的「查看更新」，也可随时从「更多 → 版本更新」查看历次改动。</li>
       <li><strong>联系开发者</strong>。在「更多」页底部可点手机号拨号，或点 QQ 邮箱发送反馈。</li>
       <li><strong>另一台设备看不到记录</strong>。数据保存在当前设备的网页 App 中，通过导出和恢复 JSON 迁移。删除网页 App 或清理站点数据可能导致本地记录丢失。</li>
       <li><strong>微信或支付宝账单导入失败</strong>。先将账单列整理成本 App 的 CSV 模板格式。应用不读取平台账号或银行卡数据。</li>
     </ul>
   </section>
-  <footer>日常账本 1.4.2 · 安装步骤参照 <a href="https://support.apple.com/zh-cn/guide/iphone/iphea86e5236/27/ios/27">Apple 官方指南</a></footer>
+  <footer>日常账本 1.4.3</footer>
 </main>
 </body>
 </html>
