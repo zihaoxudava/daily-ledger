@@ -204,6 +204,21 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
 .error { color:var(--danger) !important; font-size:.87rem; }
 .toast { position:fixed; z-index:5; bottom:20px; left:50%; transform:translateX(-50%); background:#183b2b; color:#fff; border-radius:12px; padding:12px 16px; max-width:min(90vw,500px); width:max-content; font-size:.89rem; box-shadow:0 5px 25px #18282033; }
 .guide-link { display:inline-block; font-size:.9rem; font-weight:700; color:#295d3e; }
+.debt-description { margin:-5px 0 14px; line-height:1.55; font-size:.9rem; }
+.debt-grid { align-items:start; }
+.debt-total { display:flex; justify-content:space-between; align-items:baseline; gap:8px; padding:12px; border-radius:12px; background:var(--soft); }
+.debt-total .number { font-size:1.34rem; text-align:right; overflow-wrap:anywhere; min-width:0; }
+.debt-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.8fr); align-items:center; gap:8px; width:100%; min-height:52px; padding:9px 2px; border:0; border-bottom:1px solid var(--line); background:transparent; text-align:left; overflow-wrap:anywhere; }
+.debt-row:last-child { border-bottom:0; }
+.debt-row:hover { background:var(--soft); }
+.debt-row small { display:block; color:var(--muted); font-size:.82rem; line-height:1.4; margin-top:2px; }
+.debt-row-amount { text-align:right; }
+.debt-empty { padding-top:10px; }
+.debt-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin:0; }
+.debt-facts div { padding:8px; border-radius:10px; background:var(--soft); }
+.debt-facts dt { font-size:.8rem; color:var(--muted); }
+.debt-facts dd { margin:4px 0 0; font-weight:700; overflow-wrap:anywhere; }
+.debt-note { overflow-wrap:anywhere; }
 .update-notice { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:16px auto -14px calc(224px + clamp(22px, 4vw, 58px)); padding:7px 11px; width:min(390px,calc(100% - 260px)); background:var(--paper); border:1px solid var(--line); border-radius:12px; font-size:.9rem; font-weight:700; }
 @media (min-width:760px) and (max-width:1000px) {
   .sidebar { width:177px; padding-inline:12px; }

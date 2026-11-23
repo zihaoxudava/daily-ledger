@@ -20,15 +20,17 @@ const groups = [
 ];
 
 export const types = { expense:'支出', income:'收入', transfer:'转账', refund:'退款' };
+export const debtDirections = { lent:'我借给别人', borrowed:'我向别人借' };
 export const accountTypes = { wallet:'电子钱包', bank:'银行卡', cash:'现金', credit:'信用与负债', other:'其他' };
 export const frequencies = { weekly:'每周', monthly:'每月', yearly:'每年' };
+export const tobaccoCategory = {id:'shopping-tobacco',group:'shopping',name:'烟',archived:false};
 
 export const defaultGroups = groups.map(([id,name,icon], index) => ({
   id, name, icon, type:index < 13 ? 'expense' : 'income',
 }));
 export const defaultCategories = groups.flatMap(([id,,,names]) => names.split(' ').map((name, index) => ({
   id:`${id}-${index+1}`, group:id, name, archived:false,
-})));
+}))).concat(tobaccoCategory);
 export const defaultAccounts = [
   {id:'wechat', name:'微信钱包', type:'wallet'},
   {id:'alipay', name:'支付宝', type:'wallet'},

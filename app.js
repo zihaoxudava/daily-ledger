@@ -1,6 +1,6 @@
-import { types, accountTypes, frequencies } from './catalog.js';
+import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
 import { today, shiftMonth, uid, money, parseMoney, readBook, writeBook, applyRecurring, validate,
-  validDate, validMonth, groupOf, accountOf, categoryOf } from './store.js';
+  validDate, validMonth, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { pages, nav, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
@@ -12,7 +12,7 @@ const dialog = $('#dialog');
 const dialogContent = $('#dialog-content');
 const fileInput = $('#file-input');
 const toast = $('#toast');
-const appVersion = '1.2.1';
+const appVersion = '1.3.0';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
@@ -205,6 +205,52 @@ function batchDate(offset) {
   if (validDate(value)) $('#modal-form [name=date]').value=value;
 }
 
+function openDebt(debt,direction) {
+  const initialDirection=debt?.direction ?? direction;
+  const html=`
+    ${label('借款方向',`<select name="direction">${optionMap(debtDirections,initialDirection)}</select>`)}
+    ${label('对方姓名',textInput('person',debt?.person ?? '',40,true,'姓名或称呼'))}
+    ${label('本金（元）',amountInput(debt?.amount),'form-amount')}
+    ${label('借款日期',dateInput('date',debt?.date ?? today()))}
+    ${label('备注',textInput('note',debt?.note ?? '',160,false,'选填'))}`;
+  modalFrame({kind:'debt',id:debt?.id},debt?'编辑借款':initialDirection==='lent'?'新增借出':'新增借入',
+    html,(debt?remove('删除'):cancel)+submit('保存借款'));
+}
+
+function openDebtDetail(debt) {
+  const lent=debt.direction==='lent';
+  const remaining=debtRemaining(debt);
+  const payLabel=lent?'记收款':'记还款';
+  const repayments=[...debt.payments].reverse().sort((a,b)=>b.date.localeCompare(a.date)).map(payment=>`
+    <button type="button" class="debt-row" data-action="edit-debt-payment" data-id="${esc(payment.id)}">
+      <span><strong>${payment.date}</strong>${payment.note?`<small>${esc(payment.note)}</small>`:''}</span>
+      <span class="debt-row-amount"><strong class="number">${money(payment.amount)}</strong></span>
+    </button>`).join('');
+  const html=`<p>${debtDirections[debt.direction]} · ${debt.date}</p>
+    <dl class="debt-facts">
+      <div><dt>本金</dt><dd class="number">${money(debt.amount)}</dd></div>
+      <div><dt>${lent?'已收回':'已归还'}</dt><dd class="number">${money(debtRepaid(debt))}</dd></div>
+      <div><dt>${remaining?(lent?'待收回':'待归还'):'已结清'}</dt><dd class="number">${money(remaining)}</dd></div>
+    </dl>
+    ${debt.note?`<p class="debt-note">${esc(debt.note)}</p>`:''}
+    <div><h3>${lent?'收款记录':'还款记录'}</h3>${repayments||'<p class="debt-empty">暂无记录</p>'}</div>`;
+  const edit=`<button type="button" class="button neutral" data-action="edit-debt" data-id="${esc(debt.id)}">编辑借款</button>`;
+  const pay=`<button type="button" class="button primary" data-action="new-debt-payment" data-id="${esc(debt.id)}">${payLabel}</button>`;
+  modalFrame({kind:'info',debtId:debt.id},esc(debt.person),html,edit+(remaining?pay:submit('完成')));
+}
+
+function openDebtPayment(debt,payment) {
+  const available=debtRemaining(debt)+(payment?.amount ?? 0);
+  const lent=debt.direction==='lent';
+  const todayDate=today();
+  const html=`<p>${esc(debt.person)} · ${lent?'本次最多可收回':'本次最多可归还'} ${money(available)}</p>
+    ${label('金额（元）',amountInput(payment?.amount),'form-amount')}
+    ${label('日期',dateInput('date',payment?.date ?? (debt.date>todayDate?debt.date:todayDate)))}
+    ${label('备注',textInput('note',payment?.note ?? '',160,false,'选填'))}`;
+  modalFrame({kind:'debt-payment',debtId:debt.id,id:payment?.id},payment?'编辑还款记录':lent?'记收款':'记还款',
+    html,(payment?remove('删除'):cancel)+submit('保存'));
+}
+
 function openBudget(budget) {
   const html = `
     ${label('月份',`<input type="month" name="month" value="${budget?.month ?? ui.month}" min="2000-01" max="2099-12" required>`)}
@@ -312,6 +358,27 @@ const save = {
     if (s.id) must(current.entries.some(e=>e.id===s.id),'这笔账目已在其他窗口移除。');
     upsert(current.entries,item);
   },
+  debt(current,s,get) {
+    const existing=debtOf(current,s.id);
+    if (s.id) must(existing,'这项借款已被移除。');
+    const debt={id:s.id ?? uid(),direction:get('direction'),person:get('person'),amount:parseMoney(get('amount')),
+      date:get('date'),note:get('note'),payments:existing?.payments ?? []};
+    must(debt.person,'请填写对方姓名。');
+    must(validDate(debt.date),'请填写有效日期。');
+    must(debtRemaining(debt)>=0,'本金不能小于已记录的还款金额。');
+    must(debt.payments.every(payment=>payment.date>=debt.date),'借款日期不能晚于已记录的还款日期。');
+    upsert(current.debts,debt);
+  },
+  'debt-payment'(current,s,get) {
+    const debt=debtOf(current,s.debtId);
+    must(debt,'这项借款已被移除。');
+    const previous=debt.payments.find(payment=>payment.id===s.id);
+    if (s.id) must(previous,'这笔还款已被移除。');
+    const payment={id:s.id ?? uid(),amount:parseMoney(get('amount')),date:get('date'),note:get('note')};
+    must(validDate(payment.date) && payment.date>=debt.date,'请填写有效日期，且不早于借款日期。');
+    must(payment.amount<=debtRemaining(debt)+(previous?.amount ?? 0),'金额不能超过这项借款的剩余金额。');
+    upsert(debt.payments,payment);
+  },
   budget(current,s,get) {
     const item={id:s.id ?? uid(),month:get('month'),group:get('group'),amount:parseMoney(get('amount'))};
     must(validMonth(item.month),'请填写有效月份。');
@@ -362,8 +429,9 @@ const save = {
 
 function askDelete() {
   const state=modal;
-  const labels={entry:'这笔账目',budget:'这项预算',rule:'这条周期规则'};
-  modalFrame({kind:'delete',id:state.id,collection:{entry:'entries',budget:'budgets',rule:'rules'}[state.kind]},'确认删除',
+  const labels={entry:'这笔账目',budget:'这项预算',rule:'这条周期规则',debt:'这项借款及其全部还款记录','debt-payment':'这笔还款记录'};
+  const collection={entry:'entries',budget:'budgets',rule:'rules',debt:'debts','debt-payment':'payments'}[state.kind];
+  modalFrame({kind:'delete',id:state.id,collection,debtId:state.debtId},'确认删除',
     `<p>删除${labels[state.kind]}后无法撤销。${state.kind==='rule'?'已经生成的账目仍会保留。':''}</p>`,cancel+'<button type="submit" class="button danger">确认删除</button>');
 }
 
@@ -380,7 +448,11 @@ async function submitModal(event) {
   if (submitter) submitter.disabled=true;
   try {
     if (state.kind==='delete') {
-      await commit(current=>{ current[state.collection]=current[state.collection].filter(item=>item.id!==state.id); },'已删除');
+      await commit(current=>{
+        const owner=state.collection==='payments' ? debtOf(current,state.debtId) : current;
+        must(owner,'这项借款已被移除。');
+        owner[state.collection]=owner[state.collection].filter(item=>item.id!==state.id);
+      },'已删除');
     } else if (state.kind==='restore') {
       await commit(() => validate(state.data),'已恢复完整备份');
     } else if (state.kind==='csv') {
@@ -436,7 +508,7 @@ async function inspectFile() {
       try { data=validate(JSON.parse(raw)); }
       catch (error) { throw new Error(error instanceof SyntaxError?'文件不是有效的 JSON 备份。':showError(error)); }
       modalFrame({kind:'restore',data},'确认恢复备份',`<p>${esc(file.name)}</p>
-        <p>备份含 ${data.entries.length} 笔账目、${data.accounts.length} 个账户和 ${data.budgets.length} 项预算。</p>
+        <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户和 ${data.budgets.length} 项预算。</p>
         <p>恢复会替换当前账本的全部内容。需要保留当前账目时，请先取消并导出本机备份。</p>`,cancel+submit('替换并恢复'));
     }
   } catch (error) {
@@ -452,6 +524,15 @@ function renderRecordResults() {
 const actions = {
   new:id=>openEntry(null,id),
   batch:openBatch,
+  'new-debt':direction=>openDebt(null,direction),
+  'debt-detail':id=>{ const debt=debtOf(book,id); if (debt) openDebtDetail(debt); },
+  'edit-debt':id=>{ const debt=debtOf(book,id); if (debt) openDebt(debt); },
+  'new-debt-payment':id=>{ const debt=debtOf(book,id); if (debt && debtRemaining(debt)>0) openDebtPayment(debt); },
+  'edit-debt-payment':id=>{
+    const debt=debtOf(book,modal.debtId);
+    const payment=debt?.payments.find(item=>item.id===id);
+    if (payment) openDebtPayment(debt,payment);
+  },
   'batch-date':batchDate,
   'add-batch-row':()=>{
     const row=batchRows().at(-1);

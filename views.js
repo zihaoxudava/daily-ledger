@@ -1,5 +1,5 @@
 import { types, accountTypes, frequencies } from './catalog.js';
-import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel } from './store.js';
+import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining } from './store.js';
 import { occurrence } from './schedule.js';
 
 const glyphs = {
@@ -61,7 +61,7 @@ function setting(glyph,title,subtitle,action,target='') {
 }
 
 export function nav(page, mobile) {
-  const current = ['accounts','categories','files'].includes(page) ? 'settings' : page;
+  const current = ['accounts','categories','files','debts'].includes(page) ? 'settings' : page;
   const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''}>${icon(tab)}<span>${titles[tab]}</span></a>`;
   if (!mobile) return tabs.map(link).join('');
   return [link('overview'),link('records'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('reports'),link('settings')].join('');
@@ -274,6 +274,7 @@ function settings(book,ui) {
   return header('更多','管理账户、分类与本机数据')+`
     <section class="panel">${panelHead('账本管理')}<div class="setting-grid">
     ${setting('wallet','账户','余额、期初金额和账户归档','','#accounts')}
+    ${setting('transfer','借出借入','分别查看待收回和待归还的钱','','#debts')}
     ${setting('categories','分类','自定义分类组和二级分类','','#categories')}
     ${setting('plan','预算与周期','分类预算、订阅、分期和固定收支','','#plan')}
     ${setting('file','数据与备份','完整备份、CSV 和恢复','','#files')}
@@ -304,11 +305,36 @@ function categories(book,ui) {
 function files(book) {
   return header('数据与备份','换机前请先保存一份完整备份')+`
     <section class="panel">${panelHead('完整备份 · JSON')}
-    <p class="muted">共 ${book.entries.length} 笔账目，包含账户、分类、预算和周期规则。</p>
+    <p class="muted">包含 ${book.entries.length} 笔账目、${book.debts.length} 项借出借入，以及账户、分类、预算和周期规则。</p>
     <div class="actions section-gap">${button('导出完整备份','backup','primary')}${button('恢复备份','pick-backup','neutral')}</div></section>
     <section class="panel section-gap">${panelHead('流水表格 · CSV')}
     <div class="actions">${button('导出全部流水','export','secondary')}${button('下载导入模板','csv-template','neutral')}${button('导入 CSV','pick-csv','neutral')}</div></section>
     <section class="panel section-gap"><h2>存储位置</h2><p class="muted section-gap">账目保存在当前设备的网页 App 中。换机、清理网站数据或删除主屏幕 App 前，请先导出完整备份到「文件」。</p></section>`;
 }
 
-export const pages = {overview,records,reports,plan,settings,accounts,categories,files,months:monthOverview};
+function debts(book) {
+  const sections=[
+    ['lent','借给别人','待收回','新增借出'],
+    ['borrowed','向别人借','待归还','新增借入'],
+  ].map(([direction,title,remainingLabel,add])=>{
+    const items=book.debts.filter(debt=>debt.direction===direction)
+      .map(debt=>({debt,remaining:debtRemaining(debt)}))
+      .sort((a,b)=>Number(!a.remaining)-Number(!b.remaining) || b.debt.date.localeCompare(a.debt.date));
+    const total=items.reduce((sum,item)=>sum+item.remaining,0);
+    const rows=items.map(({debt,remaining})=>`
+      <button type="button" class="debt-row" data-action="debt-detail" data-id="${esc(debt.id)}">
+        <span><strong>${esc(debt.person)}</strong><small>${debt.date} · 本金 ${money(debt.amount)}</small></span>
+        <span class="debt-row-amount"><strong class="number">${money(remaining)}</strong><small>${remaining?remainingLabel:'已结清'}</small></span>
+      </button>`).join('');
+    return `<section class="panel">
+      ${panelHead(title,button(add,'new-debt','secondary',direction))}
+      <div class="debt-total" data-debt-total="${direction}"><span>${remainingLabel}</span>${value(total)}</div>
+      <div>${rows||'<p class="muted debt-empty">暂无记录</p>'}</div>
+    </section>`;
+  }).join('');
+  return header('借出借入','')+
+    '<p class="muted debt-description">此处的本金和还款仅用于核对借款进度，总账、预算及账户余额单独计算。</p>'+
+    `<div class="top-grid debt-grid">${sections}</div>`;
+}
+
+export const pages = {overview,records,reports,plan,settings,accounts,categories,files,debts,months:monthOverview};

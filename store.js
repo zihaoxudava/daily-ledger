@@ -1,16 +1,32 @@
-import { defaultGroups, defaultCategories, defaultAccounts, accountTypes, frequencies } from './catalog.js';
+import { defaultGroups, defaultCategories, defaultAccounts, debtDirections, accountTypes, frequencies, tobaccoCategory } from './catalog.js';
 import { occurrence } from './schedule.js';
 
 export const MAX_AMOUNT = 9_999_999_999;
 const DB = 'daily-ledger';
 const STORE = 'book';
 const KEY = 'ledger';
+const MAX_CATEGORIES = 2000;
 let opening;
 
 export const initial = () => ({
   version:1, groups:structuredClone(defaultGroups), categories:structuredClone(defaultCategories),
-  accounts:structuredClone(defaultAccounts), entries:[], budgets:[], rules:[],
+  accounts:structuredClone(defaultAccounts), entries:[], budgets:[], rules:[], debts:[],
 });
+
+function withDefaults(book) {
+  if (book.debts===undefined) book={...book,debts:[]};
+  if (!Array.isArray(book.categories) || !Array.isArray(book.groups) || book.categories.length>=MAX_CATEGORIES) return book;
+  const expenseGroups=new Set(book.groups.filter(group=>group?.type==='expense').map(group=>group.id));
+  const alreadyPresent=book.categories.some(category=>category?.id===tobaccoCategory.id ||
+    category?.name===tobaccoCategory.name && expenseGroups.has(category.group));
+  if (expenseGroups.has(tobaccoCategory.group) && !alreadyPresent) {
+    return {...book,categories:[...book.categories,{...tobaccoCategory}]};
+  }
+  return book;
+}
+export const debtOf = (book,id) => book.debts.find(item=>item.id===id);
+export const debtRepaid = debt => debt.payments.reduce((sum,payment)=>sum+payment.amount,0);
+export const debtRemaining = debt => debt.amount-debtRepaid(debt);
 
 export function today() {
   const d = new Date();
@@ -63,8 +79,9 @@ function indexList(items, predicate, limit) {
 
 export function validate(book) {
   if (!book || book.version !== 1) throw new Error('请选择日常账本格式的 JSON 备份。');
+  book=withDefaults(book);
   const groups = indexList(book.groups, group => ['expense','income'].includes(group.type) && validText(group.name,28) && validText(group.icon,12), 300);
-  const categories = indexList(book.categories, cat => groups.has(cat.group) && validText(cat.name,28) && typeof cat.archived === 'boolean', 2000);
+  const categories = indexList(book.categories, cat => groups.has(cat.group) && validText(cat.name,28) && typeof cat.archived === 'boolean', MAX_CATEGORIES);
   const accounts = indexList(book.accounts, acc => Object.hasOwn(accountTypes, acc.type) && validText(acc.name,28) && validAmount(acc.opening, true) && typeof acc.archived === 'boolean', 300);
   const matches = (cat, type) => categories.has(cat) && groups.get(categories.get(cat).group).type === (type === 'income' ? 'income' : 'expense');
   if (!book.accounts.some(acc => !acc.archived) || !groups.size) throw new Error('备份需要至少一个使用中的账户和分类组。');
@@ -84,6 +101,13 @@ export function validate(book) {
     validDate(r.start) && (!r.end || validDate(r.end) && r.end >= r.start) && accounts.has(r.account) && matches(r.category,r.type) &&
     Object.hasOwn(frequencies, r.frequency) && Number.isSafeInteger(r.next) && r.next >= 0 && r.next < 5400 && typeof r.paused === 'boolean' &&
     (r.count === null || Number.isInteger(r.count) && r.count > 0 && r.count <= 600), 500);
+  indexList(book.debts, debt=>{
+    if (!Object.hasOwn(debtDirections,debt.direction) || !validText(debt.person,40) ||
+      !validAmount(debt.amount) || !validDate(debt.date) || !validText(debt.note,160,true)) return false;
+    indexList(debt.payments,payment=>validAmount(payment.amount) && validDate(payment.date) &&
+      payment.date>=debt.date && validText(payment.note,160,true),60000);
+    return debtRemaining(debt)>=0;
+  },60000);
   return book;
 }
 
@@ -110,7 +134,7 @@ export async function readBook() {
   const database = await connect();
   return new Promise((resolve, reject) => {
     const request = database.transaction(STORE).objectStore(STORE).get(KEY);
-    request.onsuccess = () => resolve(request.result ?? initial());
+    request.onsuccess = () => resolve(withDefaults(request.result ?? initial()));
     request.onerror = () => reject(request.error);
   });
 }
@@ -124,9 +148,9 @@ export async function writeBook(change) {
     let result, error;
     request.onsuccess = () => {
       try {
-        const current = request.result ?? initial();
-        result = change(current) ?? current;
-        store.put(validate(result), KEY);
+        const current = withDefaults(request.result ?? initial());
+        result = validate(change(current) ?? current);
+        store.put(result, KEY);
       } catch (cause) {
         error = cause;
         transaction.abort();
