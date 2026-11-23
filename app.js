@@ -12,6 +12,7 @@ const dialog = $('#dialog');
 const dialogContent = $('#dialog-content');
 const fileInput = $('#file-input');
 const toast = $('#toast');
+const appVersion = '1.1.1';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
@@ -182,6 +183,9 @@ function openOffline() {
   modalFrame({kind:'info'},'iPhone 安装与离线',`<p>${status}</p>
     <p>${standalone?'你已从主屏幕打开账本。':'在 Safari 打开账本，轻点「共享」→「添加到主屏幕」，打开「作为网页 App 打开」（如有），然后轻点「添加」。'}</p>
     <p>安装后先从图标联网打开一次，再开启飞行模式试记一笔。换机前请到「更多」→「数据与备份」导出 JSON。</p>
+    <p>当前版本 <strong>${appVersion}</strong></p>
+    <button type="button" class="button secondary" data-action="check-update">检查更新</button>
+    <p id="update-status" aria-live="polite" hidden></p>
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
 }
 
@@ -377,6 +381,7 @@ const actions = {
   'load-more':()=>{ ui.limit+=50; renderRecordResults(); },
   close:()=>{ if (!busy) dialog.close(); },
   reload:()=>location.reload(),
+  'check-update':()=>checkUpdate(true),
   'ask-delete':askDelete,
   'offline-info':openOffline,
   'pick-csv':()=>chooseFile('csv'),
@@ -458,8 +463,16 @@ fileInput.addEventListener('change',inspectFile);
 dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
 dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy) dialog.close(); });
 window.addEventListener('hashchange',()=>route(true));
-window.addEventListener('pageshow',event=>{ if (event.persisted && book) refresh(true); });
-document.addEventListener('visibilitychange',()=>{ if (document.visibilityState==='visible' && book) refresh(true); });
+window.addEventListener('pageshow',event=>{
+  if (!event.persisted) return;
+  if (book) refresh(true);
+  checkUpdate();
+});
+document.addEventListener('visibilitychange',()=>{
+  if (document.visibilityState!=='visible') return;
+  if (book) refresh(true);
+  checkUpdate();
+});
 if (channel) channel.onmessage=()=>{ if (!busy) refresh(); };
 
 function offlineStatus() {
@@ -468,12 +481,68 @@ function offlineStatus() {
   status.innerHTML=`<span class="status-dot"></span>${ui.offlineReady ? navigator.onLine?'离线可用':'离线中' : '本机账本'}`;
   if (page==='settings' && book && !dialog.open) render();
 }
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('controllerchange',offlineStatus);
-  navigator.serviceWorker.register('./sw.js').then(offlineStatus).catch(console.warn);
+const workers = navigator.serviceWorker;
+const updateNotice = $('#update-notice');
+let lastController = workers?.controller;
+let registrationJob, updateJob, lastUpdateCheck=0, updateReady=false;
+
+function updateStatus(message) {
+  const messageLine=$('#update-status');
+  if (!messageLine) return;
+  messageLine.textContent=message;
+  messageLine.hidden=false;
 }
-window.addEventListener('online',offlineStatus);
+
+async function checkUpdate(manual=false) {
+  if (!workers || !navigator.onLine) {
+    if (manual) updateStatus(workers?'联网后可检查更新。':'当前浏览器无法检查网页 App 更新。');
+    return;
+  }
+  if (updateReady) {
+    if (manual) updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
+    return;
+  }
+  if (!manual && (updateJob || Date.now()-lastUpdateCheck<60000)) return;
+  if (manual) updateStatus('正在检查更新…');
+  if (!updateJob) {
+    lastUpdateCheck=Date.now();
+    registrationJob ??= workers.register('./sw.js',{updateViaCache:'none'}).catch(error=>{
+      registrationJob=undefined;
+      throw error;
+    });
+    updateJob=registrationJob.then(async registration=>{
+      if (registration.active && !registration.installing && !registration.waiting) await registration.update();
+      return registration;
+    }).finally(()=>{updateJob=undefined;});
+  }
+  try {
+    const registration=await updateJob;
+    if (manual) {
+      if (updateReady) updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
+      else if (registration.installing || registration.waiting) updateStatus('正在准备离线资源。');
+      else updateStatus('当前已是最新版本。');
+    }
+  } catch {
+    if (manual) updateStatus('暂时无法检查更新，请联网后再试。');
+  }
+}
+
+workers?.addEventListener('controllerchange',()=>{
+  if (lastController && workers.controller && workers.controller!==lastController) {
+    updateReady=true;
+    if (updateNotice) updateNotice.hidden=false;
+    updateStatus('新版已就绪。关闭此窗口后点页面上的「立即更新」。');
+  }
+  lastController=workers.controller;
+  offlineStatus();
+});
+window.addEventListener('online',()=>{
+  lastUpdateCheck=0;
+  offlineStatus();
+  checkUpdate();
+});
 window.addEventListener('offline',offlineStatus);
 offlineStatus();
 route();
 refresh(true);
+checkUpdate();
