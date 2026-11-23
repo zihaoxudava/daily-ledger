@@ -12,7 +12,7 @@ const dialog = $('#dialog');
 const dialogContent = $('#dialog-content');
 const fileInput = $('#file-input');
 const toast = $('#toast');
-const appVersion = '1.2.0';
+const appVersion = '1.2.1';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,

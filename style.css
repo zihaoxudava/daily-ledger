@@ -251,7 +251,7 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
   .section-gap { margin-top:12px; }
   .bar-area { height:104px; }
   dialog { max-height:calc(100% - 22px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
-  dialog.batch-dialog { position:fixed; inset:auto 0 var(--batch-bottom, 0px); width:100%; margin:0; border-radius:21px 21px 0 0; max-height:calc(var(--batch-height, 100vh) - max(8px,env(safe-area-inset-top))); }
+  dialog.batch-dialog { position:fixed; inset:auto 0 var(--batch-bottom, 0px); width:100%; max-width:none; margin:0; border-radius:21px 21px 0 0; max-height:calc(var(--batch-height, 100vh) - max(8px,env(safe-area-inset-top))); }
   .batch-dialog .modal-head { padding:10px 14px; }
   .batch-dialog .modal-body { padding:12px 14px; }
   .batch-dialog .modal-foot { padding:10px 14px max(10px,env(safe-area-inset-bottom)); }
