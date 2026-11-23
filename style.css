@@ -224,7 +224,8 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
 #attachment-preview img { display:block; width:100%; max-height:60vh; object-fit:contain; }
 .form-amount input { font-size:1.62rem; font-weight:730; letter-spacing:-.04em; }
 .error { color:var(--danger) !important; font-size:.87rem; }
-.toast { position:fixed; z-index:5; bottom:20px; left:50%; transform:translateX(-50%); background:#183b2b; color:#fff; border-radius:12px; padding:12px 16px; max-width:min(90vw,500px); width:max-content; font-size:.89rem; box-shadow:0 5px 25px #18282033; }
+.toast { position:fixed; z-index:5; bottom:20px; inset-inline:0; margin-inline:auto; display:flex; align-items:center; gap:8px; background:#183b2b; color:#fff; border-radius:12px; padding:12px 16px; max-width:min(90vw,500px); width:max-content; font-size:.89rem; box-shadow:0 5px 25px #18282033; }
+.toast .icon { width:19px; height:19px; color:var(--accent); flex:none; }
 .guide-link { display:inline-block; font-size:.9rem; font-weight:700; color:#295d3e; }
 .debt-description { margin:-5px 0 14px; line-height:1.55; font-size:.9rem; }
 .debt-grid { align-items:start; }
@@ -322,5 +323,30 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
   .month-tile { min-height:80px; gap:6px; padding:12px; }
 }
 @media (prefers-reduced-motion:no-preference) {
-  button,a,input,select { transition:background-color .14s; }
+  :root { --motion-settle:cubic-bezier(.2, 0, 0, 1); }
+  button,a,input,select { transition:background-color 140ms, color 140ms; }
+  .button,.quick-actions button,.tabbar .tab-plus { transition:background-color 140ms, color 140ms, transform 115ms var(--motion-settle); }
+  .button:active:not(:disabled),.quick-actions button:active,.tabbar button:active .tab-plus { transform:translateY(1px) scale(.975); }
+  dialog[open] { animation:dialog-in 185ms var(--motion-settle); }
+  dialog[open]::backdrop { animation:backdrop-in 165ms ease-out; }
+  .batch-row-enter { animation:row-in 165ms var(--motion-settle); }
+}
+@media (max-width:759px) and (prefers-reduced-motion:no-preference) {
+  dialog.batch-dialog[open] { animation:sheet-in 220ms var(--motion-settle); }
+}
+@keyframes dialog-in {
+  from { opacity:.64; transform:translateY(7px) scale(.985); }
+  to { opacity:1; transform:none; }
+}
+@keyframes sheet-in {
+  from { opacity:.72; transform:translateY(20px); }
+  to { opacity:1; transform:none; }
+}
+@keyframes backdrop-in {
+  from { opacity:0; }
+  to { opacity:1; }
+}
+@keyframes row-in {
+  from { opacity:.63; transform:translateY(6px); }
+  to { opacity:1; transform:none; }
 }

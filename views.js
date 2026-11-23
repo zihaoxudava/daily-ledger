@@ -28,6 +28,7 @@ const glyphs = {
   left:'<path d="m14 7-5 5 5 5"/>',
   right:'<path d="m10 7 5 5-5 5"/>',
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
+  check:'<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
   down:'<path d="m6 9 6 6 6-6"/>',
 };
 export const icon = name => `<svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${glyphs[name] ?? glyphs.file}</svg>`;

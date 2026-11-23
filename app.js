@@ -32,20 +32,37 @@ let installPrompt;
 const isInstalled=()=>!!android || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
+const motion = matchMedia('(prefers-reduced-motion: no-preference)');
+let pageAnimation, toastAnimation;
 
-function tell(message) {
-  toast.textContent = message;
+function enter(element, distance, duration) {
+  if (!motion.matches || !element.animate) return;
+  return element.animate([
+    {opacity:.76,transform:`translateY(${distance}px)`},
+    {opacity:1,transform:'translateY(0)'},
+  ],{duration,easing:'cubic-bezier(.2, 0, 0, 1)'});
+}
+
+function tell(message, success=false) {
+  toast.innerHTML = `${success?icon('check'):''}<span>${esc(message)}</span>`;
   toast.hidden = false;
+  toastAnimation?.cancel();
+  toastAnimation=enter(toast,7,170);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { toast.hidden=true; }, 4200);
 }
 
 function route(resetScroll=false) {
   const hash = location.hash.slice(1);
+  const previous=page;
   page = Object.hasOwn(pages,hash) ? hash : 'overview';
   render();
   if (page==='updates') markReleaseSeen();
   if (resetScroll) scrollTo(0,0);
+  if (book && previous && previous!==page) {
+    pageAnimation?.cancel();
+    pageAnimation=enter(content,5,150);
+  }
 }
 
 function monthOrigin() {
@@ -116,12 +133,14 @@ async function flushRefresh() {
 
 function modalFrame(state, title, inner, actions) {
   modal=state;
-  dialog.classList.toggle('batch-dialog',state.kind==='batch');
+  const batch=state.kind==='batch';
+  dialog.classList.toggle('batch-dialog',batch);
   dialogContent.innerHTML = `<header class="modal-head"><h2 id="dialog-title">${title}</h2>
     <button type="button" class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></header>
     <form id="modal-form"><div class="modal-body">${inner}<p class="error" id="modal-error" role="alert" hidden></p></div>
     <footer class="modal-foot">${actions}</footer></form>`;
   if (!dialog.open) dialog.showModal();
+  else if (!batch || matchMedia('(min-width:760px)').matches) enter(dialogContent.querySelector('.modal-body'),3,130);
 }
 const cancel = '<button type="button" class="button neutral" data-action="close">取消</button>';
 const submit = text => `<button class="button primary" type="submit">${text}</button>`;
@@ -230,7 +249,7 @@ function appendBatchRow(fields={}, focus=false) {
   const prefix=`batch-${id}-`;
   const type=fields.type ?? 'expense';
   $('#batch-rows').insertAdjacentHTML('beforeend',`
-    <section class="batch-row" data-batch-row="${id}" aria-labelledby="batch-row-title-${id}">
+    <section class="batch-row${focus?' batch-row-enter':''}" data-batch-row="${id}" aria-labelledby="batch-row-title-${id}">
       <div class="batch-row-tools"><h3 id="batch-row-title-${id}"></h3><button type="button" class="link-button" data-action="remove-batch-row" data-id="${id}">移除此笔</button></div>
       <div class="field-row">
         ${label('金额（元）',`<input name="${prefix}amount" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${esc(fields.amount ?? '')}" required>`,'batch-amount')}
@@ -503,7 +522,7 @@ async function commit(change, message, afterWrite, files) {
   channel?.postMessage('change');
   dialog.close();
   route();
-  if (message) tell(message);
+  if (message) tell(message,true);
 }
 
 function makeEntry(current, type, get, date, note, id=uid()) {
