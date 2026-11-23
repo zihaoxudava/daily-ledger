@@ -89,7 +89,7 @@ export function mountNote(scope,attachments=[],draft) {
         const blob=state.files.get(id) ?? await readAttachment(item);
         if (!root.isConnected || !root.closest('dialog').open) return;
         if (previewableImage(item.type)) openPhoto(item,blob);
-        else saveFile(item,blob);
+        else await saveFile(item,blob);
       } catch (cause) { fail(cause.message); }
     }
   });
@@ -101,7 +101,7 @@ function formatSize(bytes) {
 }
 
 function saveFile(item,blob) {
-  download(item.name,blob.slice(0,blob.size,'application/octet-stream'));
+  return download(item.name,blob.slice(0,blob.size,'application/octet-stream'));
 }
 
 function openPhoto(item,blob) {
@@ -121,7 +121,14 @@ previewImage.addEventListener('error',()=>{
   previewImage.hidden=true;
   preview.querySelector('.error').hidden=false;
 });
-preview.querySelector('[data-download]').addEventListener('click',()=>saveFile(previewFile.item,previewFile.blob));
+preview.querySelector('[data-download]').addEventListener('click',async()=>{
+  try { await saveFile(previewFile.item,previewFile.blob); }
+  catch (error) {
+    const label=preview.querySelector('.error');
+    label.textContent=error.message;
+    label.hidden=false;
+  }
+});
 preview.addEventListener('close',()=>{
   if (preview.open) return;
   previewImage.removeAttribute('src');

@@ -6,6 +6,7 @@ import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
 import { buildBackup, restoreAttachmentFiles, maxBackupBytes } from './attachments.js';
 import { noteFields, noteDraft, mountNote, readNote } from './note.js';
+import { android } from './native.js';
 import { pages, nav, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
   categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth } from './views.js';
 
@@ -28,7 +29,7 @@ const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
 let pendingRefresh=0, refreshing=false;
 let installPrompt;
-const isInstalled=()=>matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isInstalled=()=>!!android || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
 
@@ -443,7 +444,7 @@ function openRule(rule) {
 function openOffline() {
   const standalone = isInstalled();
   const status = ui.offlineReady ? '离线资源已就绪。' : '离线资源还在准备中。请保持联网，重新打开本页后查看状态。';
-  modalFrame({kind:'info'},'安装到桌面',`<p>${status}${standalone?' 已在独立窗口打开。':''}</p>
+  modalFrame({kind:'info'},android?'应用信息':'安装到桌面',`<p>${status}${standalone?' 已在独立窗口打开。':''}</p>
     <button type="button" id="install-app" class="button primary" data-action="install-app"${installPrompt && !standalone?'':' hidden'}>安装日常账本</button>
     ${standalone?'':`<ul class="install-steps">
       <li><strong>iPhone / iPad</strong> 在 Safari 点「共享 → 添加到主屏幕」，开启「作为网页 App 打开」（如有）。</li>
@@ -452,9 +453,9 @@ function openOffline() {
       <li><strong>Windows / Linux</strong> 用 Chrome 或 Edge 安装网页 App，可创建桌面快捷方式。</li>
       <li><strong>Mac</strong> 用 Chrome 安装，或在 macOS 14 及以上用 Safari「文件 → 添加到程序坞」。</li>
     </ul>`}
-    <p>安装后先从图标联网打开一次。显示「离线可用」后就能断网记账。跨设备可通过 JSON 备份迁移。</p>
+    <p>${android?'账目和附件存放在此 App 内，可以断网记账。':'安装后先从图标联网打开一次。显示「离线可用」后就能断网记账。'}跨设备可通过 JSON 备份迁移。</p>
     <p>当前版本 <strong>${appVersion}</strong></p>
-    <p>联网时会自动检查更新。新版就绪后，页面顶部会出现「立即更新」。</p>
+    <p>联网时会自动检查更新。新版就绪后，页面顶部会出现「${android?'下载更新':'立即更新'}」。</p>
     <button type="button" class="button neutral" data-action="show-releases">版本更新</button>
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
 }
@@ -469,6 +470,13 @@ async function installApp() {
     dialog.close();
     tell('已确认安装，请从桌面或主屏幕打开。');
   }
+}
+
+function showNativeUpdate() {
+  const changes=nativeRelease.changes.map(change=>`<li>${esc(change)}</li>`).join('');
+  modalFrame({kind:'info'},`新版 ${esc(nativeRelease.version)}`,`<ul class="install-steps">${changes}</ul>
+    <p>下载后打开 APK，按系统提示覆盖安装。可以继续用原来的账本。</p>
+    <button type="button" class="button primary" data-action="reload">下载更新</button>`,submit('关闭'));
 }
 
 function setEntryType(type) {
@@ -752,7 +760,8 @@ const actions = {
   'report-range':id=>{ ui.year=id==='year'; render(); },
   'load-more':()=>{ ui.limit+=50; renderRecordResults(); },
   close:()=>{ if (!busy) dialog.close(); },
-  reload:()=>location.reload(),
+  reload:()=>{ if (android && nativeRelease) android.openUpdate(nativeRelease.versionCode); else location.reload(); },
+  'show-native-update':showNativeUpdate,
   'set-time':(_id,button)=>toggleTime(button,true),
   'clear-time':(_id,button)=>toggleTime(button,false),
   'show-releases':()=>{
@@ -771,8 +780,8 @@ const actions = {
     try {
       const {book,files}=await readBackup();
       if (files.size) tell('正在打包账目与附件…');
-      download(`日常账本-备份-${today()}.json`,await buildBackup(book,files));
-      tell('备份下载已发起');
+      await download(`日常账本-备份-${today()}.json`,await buildBackup(book,files));
+      if (!android) tell('备份下载已发起');
     } finally { button.disabled=false; }
   },
   export:()=>download(`日常账本-全量-${today()}.csv`,exportCSV(book),'text/csv;charset=utf-8'),
@@ -880,12 +889,12 @@ document.addEventListener('visibilitychange',()=>{
 if (channel) channel.onmessage=()=>refresh();
 
 function offlineStatus() {
-  ui.offlineReady=!!navigator.serviceWorker?.controller;
+  ui.offlineReady=!!android || !!navigator.serviceWorker?.controller;
   const status=$('#mobile-status');
   status.innerHTML=`<span class="status-dot"></span>${ui.offlineReady ? navigator.onLine?'离线可用':'离线中' : '本机账本'}`;
   if (page==='settings' && book && !dialog.open) render();
 }
-const workers = navigator.serviceWorker;
+const workers = android ? null : navigator.serviceWorker;
 const updateNotice = $('#update-notice');
 const releaseNotice = $('#release-notice');
 let seenRelease;
@@ -893,6 +902,7 @@ try { seenRelease=localStorage.getItem(releaseSeenKey); }
 catch {}
 let lastController = workers?.controller;
 let registrationJob, updateJob, lastUpdateCheck=0, updateReady=false;
+let nativeRelease;
 
 function markReleaseSeen() {
   if (seenRelease===appVersion) return;
@@ -903,6 +913,24 @@ function markReleaseSeen() {
 }
 
 async function checkUpdate() {
+  if (android) {
+    if (updateJob || !navigator.onLine || Date.now()-lastUpdateCheck<60000) return;
+    lastUpdateCheck=Date.now();
+    updateJob=fetch('/native-update.json',{cache:'no-store'}).then(async response=>{
+      if (!response.ok) return;
+      const release=await response.json();
+      if (!Number.isSafeInteger(release.versionCode) || release.versionCode<=android.versionCode() ||
+          typeof release.version!=='string' || !/^\d+\.\d+\.\d+$/.test(release.version) ||
+          !Array.isArray(release.changes) || !release.changes.every(change=>typeof change==='string')) return;
+      nativeRelease=release;
+      releaseNotice.hidden=true;
+      updateNotice.hidden=false;
+      $('#update-title').textContent=`可更新至 ${release.version}`;
+      $('#update-changes').hidden=false;
+      $('#update-notice [data-action="reload"]').textContent='下载更新';
+    }).catch(()=>{}).finally(()=>{updateJob=undefined;});
+    return updateJob;
+  }
   if (!workers || !navigator.onLine || updateReady || updateJob || Date.now()-lastUpdateCheck<60000) return;
   lastUpdateCheck=Date.now();
   registrationJob ??= workers.register('./sw.js',{updateViaCache:'none'}).catch(error=>{
@@ -936,6 +964,9 @@ window.addEventListener('online',()=>{
   checkUpdate();
 });
 window.addEventListener('offline',offlineStatus);
+window.addEventListener('nativeforeground',()=>{
+  if (!dialog.open) checkUpdate();
+});
 window.addEventListener('beforeinstallprompt',event=>{
   if (isInstalled() || typeof event.prompt!=='function') return;
   event.preventDefault();

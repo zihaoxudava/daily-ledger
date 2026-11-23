@@ -1,5 +1,6 @@
 import { types } from './catalog.js';
 import { categoryOf, groupOf, accountOf, parseMoney, uid, validDate, validTime } from './store.js';
+import { android, saveNativeDownload } from './native.js';
 
 const headers = ['日期','类型','金额','账户','转入账户','分类组','分类','备注','记录编号','时间'];
 const byName = Object.fromEntries(Object.entries(types).map(([type,label]) => [label,type]));
@@ -114,6 +115,7 @@ export function importCSV(book, raw) {
 
 export function download(name, content, type) {
   const file = content instanceof Blob ? content : new Blob([content], {type});
+  if (android) return saveNativeDownload(name,file);
   const url = URL.createObjectURL(file);
   const link = Object.assign(document.createElement('a'), {href:url,download:name});
   document.body.append(link);

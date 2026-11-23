@@ -25,7 +25,8 @@
     <button type="button" id="mobile-status" class="offline-badge" data-action="offline-info" aria-live="polite"><span class="status-dot"></span>本机账本</button>
   </header>
   <div class="update-notice" id="update-notice" hidden>
-    <span role="status">新版已就绪</span>
+    <span role="status" id="update-title">新版已就绪</span>
+    <button type="button" class="link-button" id="update-changes" data-action="show-native-update" hidden>查看改动</button>
     <button type="button" class="button secondary" data-action="reload">立即更新</button>
   </div>
   <aside class="update-notice release-notice" id="release-notice" aria-label="本次版本更新" hidden>

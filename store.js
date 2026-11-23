@@ -1,6 +1,7 @@
 import { defaultGroups, defaultCategories, defaultAccounts, debtDirections, accountTypes, frequencies, tobaccoCategory } from './catalog.js';
 import { occurrence } from './schedule.js';
 import { attachmentIndex, requireAttachment } from './attachments.js';
+import { android, readNativeBook, writeNativeBook, readNativeAttachment } from './native.js';
 
 export const MAX_AMOUNT = 9_999_999_999;
 const DB = 'daily-ledger';
@@ -9,6 +10,7 @@ const KEY = 'ledger';
 const attachmentKey = id => `attachment:${id}`;
 const MAX_CATEGORIES = 2000;
 let opening;
+let nativeWrite=Promise.resolve();
 
 export const initial = () => ({
   version:1, groups:structuredClone(defaultGroups), categories:structuredClone(defaultCategories),
@@ -137,6 +139,7 @@ function connect() {
 }
 
 export async function readBook() {
+  if (android) return withDefaults(readNativeBook() ?? initial());
   const database = await connect();
   return new Promise((resolve, reject) => {
     const request = database.transaction(STORE).objectStore(STORE).get(KEY);
@@ -146,6 +149,7 @@ export async function readBook() {
 }
 
 export async function readAttachment(item) {
+  if (android) return readNativeAttachment(item);
   const database=await connect();
   return new Promise((resolve,reject)=>{
     const request=database.transaction(STORE).objectStore(STORE).get(attachmentKey(item.id));
@@ -158,6 +162,16 @@ export async function readAttachment(item) {
 }
 
 export async function readBackup() {
+  if (android) {
+    const snapshot=nativeWrite.then(async()=>{
+      const book=await readBook();
+      const files=new Map();
+      for (const [id,item] of attachmentIndex(book)) files.set(id,await readNativeAttachment(item));
+      return {book,files};
+    });
+    nativeWrite=snapshot.catch(()=>{});
+    return snapshot;
+  }
   const database=await connect();
   return new Promise((resolve,reject)=>{
     const transaction=database.transaction(STORE);
@@ -184,6 +198,16 @@ export async function readBackup() {
 }
 
 export async function writeBook(change,files=new Map()) {
+  if (android) {
+    const write=nativeWrite.then(async()=>{
+      const current=await readBook();
+      const next=validate(change(current) ?? current);
+      await writeNativeBook(next,attachmentIndex(next),files);
+      return next;
+    });
+    nativeWrite=write.catch(()=>{});
+    return write;
+  }
   const buffers=new Map();
   for (const [id,file] of files) buffers.set(id,file instanceof Blob ? await file.arrayBuffer() : file);
   const database = await connect();

@@ -2,7 +2,7 @@
 
 中文个人记账网页 App。可通过支持安装的浏览器添加到手机、平板和电脑桌面，首次联网加载后支持离线记账。
 
-[在线使用](https://zihaoxudava.github.io/daily-ledger/) · [使用手册](guide/index.html)
+[在线使用](https://zihaoxudava.github.io/daily-ledger/) · [下载 Android 安装包](https://zihaoxudava.github.io/daily-ledger/downloads/daily-ledger-android.apk) · [使用手册](guide/index.html)
 
 ## 功能
 
@@ -13,7 +13,7 @@
 - 按周、月、年重复的账单与分期
 - 备注可加照片和文件，CSV 导入导出流水，JSON 备份和恢复账本及附件
 
-账目保存在浏览器或主屏幕 App 的 IndexedDB 中。不同设备或网址的账本各自存储。迁移时请从旧账本导出 JSON，再在新地址恢复。
+网页账目保存在浏览器或主屏幕 App 的 IndexedDB 中。Android 安装版使用应用私有目录存储。跨设备、跨网址或迁入安装版时，先导出完整 JSON，再恢复到目标账本。
 
 ## 本地运行
 
@@ -30,6 +30,8 @@ python -m http.server 8080
 把包含 `index.html` 的应用目录作为站点根目录，部署到支持 HTTPS 的静态托管。应用可以放到子路径，例如 GitHub Pages 的项目站点。首次部署后，确认页面显示「离线可用」。
 
 发布新版时，在 `releases.js` 顶部添加新版本号、简短标题和用户可见的改动，同时更新 `sw.js` 的缓存版本和使用手册的版本号。新增上线资源时也要更新离线资源清单。
+
+Android 安装版的构建和升级步骤见 [Android 构建说明](android/README.md)。
 
 ## 许可证
 
