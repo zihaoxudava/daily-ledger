@@ -12,7 +12,7 @@ const dialog = $('#dialog');
 const dialogContent = $('#dialog-content');
 const fileInput = $('#file-input');
 const toast = $('#toast');
-const appVersion = '1.1.1';
+const appVersion = '1.2.0';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
@@ -87,6 +87,7 @@ async function refresh(runDue=false) {
 
 function modalFrame(state, title, inner, actions) {
   modal=state;
+  dialog.classList.toggle('batch-dialog',state.kind==='batch');
   dialogContent.innerHTML = `<header class="modal-head"><h2 id="dialog-title">${title}</h2>
     <button type="button" class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></header>
     <form id="modal-form"><div class="modal-body">${inner}<p class="error" id="modal-error" role="alert" hidden></p></div>
@@ -102,14 +103,15 @@ function errorInModal(message) {
   if (!element) { tell(message); return; }
   element.textContent=message;
   element.hidden=false;
+  if (modal.kind==='batch') element.scrollIntoView({block:'nearest'});
 }
 
-function entryFields(type, fields={}) {
+function entryFields(type, fields={}, prefix='') {
   const category = type!=='transfer'
-    ? label(type==='refund' ? '原支出分类' : '分类',`<select name="category" required>${categoryOptions(book,type,fields.category)}</select>`)
+    ? label(type==='refund' ? '原支出分类' : '分类',`<select name="${prefix}category" required>${categoryOptions(book,type,fields.category)}</select>`)
     : '';
-  return `<div class="field-row">${label(type==='transfer'?'转出账户':'账户',`<select name="account" required>${accountOptions(book,fields.account,'请选择账户')}</select>`)}
-  ${type==='transfer' ? label('转入账户',`<select name="to" required>${accountOptions(book,fields.to,'请选择账户',fields.account)}</select>`) : category}</div>`;
+  return `<div class="field-row">${label(type==='transfer'?'转出账户':'账户',`<select name="${prefix}account" required>${accountOptions(book,fields.account,'请选择账户')}</select>`)}
+  ${type==='transfer' ? label('转入账户',`<select name="${prefix}to" required>${accountOptions(book,fields.to,'请选择账户',fields.account)}</select>`) : category}</div>`;
 }
 
 function openEntry(record, type='expense') {
@@ -119,12 +121,88 @@ function openEntry(record, type='expense') {
     `<button type="button" data-action="entry-type" data-id="${key}" aria-pressed="${key===type}">${text}</button>`).join('');
   const defaults = { ...record, account:record?.account ?? book.accounts.find(a=>!a.archived)?.id ?? '' };
   const html = `
+    ${record?'':'<div class="entry-tools"><button type="button" class="button secondary" data-action="batch">批量记账</button></div>'}
     <div class="segments" aria-label="账目类型">${choices}</div>
     ${label('金额（人民币）',amountInput(record?.amount),'form-amount')}
     <div id="entry-fields">${entryFields(type,defaults)}</div>
     ${label('日期',dateInput('date',record?.date ?? today()))}
     ${label('备注',textInput('note',record?.note ?? '',160,false,'商家、用途或其他说明'))}`;
   modalFrame(state,record?'编辑账目':'记一笔',html,(record ? remove('删除') : cancel)+submit('保存账目'));
+}
+
+const batchRows = () => [...dialog.querySelectorAll('[data-batch-row]')];
+const rowPrefix = row => `batch-${row.dataset.batchRow}-`;
+const rowControl = (row,key) => row.querySelector(`[name="${rowPrefix(row)}${key}"]`);
+
+function fitBatchSheet() {
+  const viewport=window.visualViewport;
+  if (!dialog.open || modal.kind!=='batch' || !viewport) return;
+  const unscaled=viewport.scale===1;
+  dialog.style.setProperty('--batch-height',unscaled?`${viewport.height}px`:'');
+  dialog.style.setProperty('--batch-bottom',unscaled?`${Math.max(0,window.innerHeight-viewport.height-viewport.offsetTop)}px`:'');
+}
+
+function updateBatchCount() {
+  const rows=batchRows();
+  rows.forEach((row,index)=>{
+    row.querySelector('h3').textContent=`第 ${index+1} 笔`;
+    row.querySelector('[data-action="remove-batch-row"]').hidden=rows.length===1;
+  });
+  $('#batch-submit').textContent=`保存 ${rows.length} 笔`;
+}
+
+function appendBatchRow(fields={}, focus=false) {
+  const id=modal.nextRow++;
+  const prefix=`batch-${id}-`;
+  const type=fields.type ?? 'expense';
+  $('#batch-rows').insertAdjacentHTML('beforeend',`
+    <section class="batch-row" data-batch-row="${id}" aria-labelledby="batch-row-title-${id}">
+      <div class="batch-row-tools"><h3 id="batch-row-title-${id}"></h3><button type="button" class="link-button" data-action="remove-batch-row" data-id="${id}">移除此笔</button></div>
+      <div class="field-row">
+        ${label('金额（元）',`<input name="${prefix}amount" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${esc(fields.amount ?? '')}" required>`,'batch-amount')}
+        ${label('账目类型',`<select name="${prefix}type">${optionMap(types,type)}</select>`)}
+      </div>
+      <div class="batch-fields">${entryFields(type,fields,prefix)}</div>
+      ${label('备注',textInput(prefix+'note',fields.note ?? '',160,false,'选填'))}
+    </section>`);
+  updateBatchCount();
+  if (focus) {
+    const row=$(`[data-batch-row="${id}"]`);
+    row.scrollIntoView({block:'nearest'});
+    rowControl(row,'amount').focus({preventScroll:true});
+  }
+}
+
+function openBatch() {
+  const draft=dialog.open && modal.kind==='entry' && !modal.id ? new FormData($('#modal-form')) : null;
+  const date=draft?.get('date') || today();
+  const fields={
+    type:draft ? modal.type : 'expense',
+    account:draft?.get('account') ?? book.accounts.find(a=>!a.archived)?.id,
+    amount:draft?.get('amount'),
+    category:draft?.get('category'),
+    to:draft?.get('to'),
+    note:draft?.get('note'),
+  };
+  modalFrame({kind:'batch',nextRow:1},'批量记账',`
+    <div class="batch-date">
+      ${label('统一日期',dateInput('date',date))}
+      <div class="batch-date-actions">
+        <button type="button" class="button neutral" data-action="batch-date" data-id="0">今天</button>
+        <button type="button" class="button neutral" data-action="batch-date" data-id="-1">昨天</button>
+      </div>
+    </div>
+    <div id="batch-rows" class="batch-rows"></div>`,
+  '<button type="button" class="button secondary" data-action="add-batch-row">＋ 再加一笔</button><button type="submit" class="button primary" id="batch-submit">保存</button>');
+  appendBatchRow(fields);
+  fitBatchSheet();
+}
+
+function batchDate(offset) {
+  const date=new Date(`${today()}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate()+Number(offset));
+  const value=date.toISOString().slice(0,10);
+  if (validDate(value)) $('#modal-form [name=date]').value=value;
 }
 
 function openBudget(budget) {
@@ -207,22 +285,30 @@ function must(condition,message) {
   if (!condition) throw new Error(message);
 }
 
-async function commit(change, message) {
+async function commit(change, message, afterWrite) {
   book=await writeBook(change);
+  afterWrite?.();
   channel?.postMessage('change');
   dialog.close();
   route();
   if (message) tell(message);
 }
 
+function makeEntry(current, type, get, date, id=uid()) {
+  must(validDate(date),'请填写有效日期。');
+  must(Object.hasOwn(types,type),'请选择账目类型。');
+  const transfer=type==='transfer';
+  const item={id,type,amount:parseMoney(get('amount')),date,account:get('account'),
+    to:transfer?get('to'):'',category:transfer?'':get('category'),note:get('note')};
+  must(accountOf(current,item.account),'请选择账户。');
+  if (transfer) must(accountOf(current,item.to) && item.account!==item.to,'请选择不同的转入和转出账户。');
+  else must(categoryOf(current,item.category),'请选择分类。');
+  return item;
+}
+
 const save = {
   entry(current,s,get) {
-    const item={id:s.id ?? uid(),type:s.type,amount:parseMoney(get('amount')),date:get('date'),
-      account:get('account'),to:s.type==='transfer'?get('to'):'',category:s.type==='transfer'?'':get('category'),note:get('note')};
-    must(validDate(item.date),'请填写有效日期。');
-    must(accountOf(current,item.account),'请选择账户。');
-    if (s.type==='transfer') must(item.to && item.account!==item.to,'请选择不同的转入和转出账户。');
-    else must(categoryOf(current,item.category),'请选择分类。');
+    const item=makeEntry(current,s.type,get,get('date'),s.id);
     if (s.id) must(current.entries.some(e=>e.id===s.id),'这笔账目已在其他窗口移除。');
     upsert(current.entries,item);
   },
@@ -301,6 +387,21 @@ async function submitModal(event) {
       let summary;
       await commit(current=>{ summary=importCSV(current,state.raw); });
       tell(`已导入 ${summary.added} 笔，跳过 ${summary.skipped} 笔重复编号`);
+    } else if (state.kind==='batch') {
+      const date=get('date');
+      must(validDate(date),'请选择有效的统一日期。');
+      const rows=batchRows().map(rowPrefix);
+      await commit(current=>{
+        const entries=rows.map((prefix,index)=>{
+          const field=key=>get(prefix+key);
+          try { return makeEntry(current,field('type'),field,date); }
+          catch (error) { throw new Error(`第 ${index+1} 笔：${showError(error)}`); }
+        });
+        current.entries.push(...entries);
+      },`已保存 ${rows.length} 笔`,()=>{
+        ui.month=date.slice(0,7);
+        ui.limit=50;
+      });
     } else {
       await commit(current=>save[state.kind](current,state,get),'已保存');
     }
@@ -350,6 +451,17 @@ function renderRecordResults() {
 
 const actions = {
   new:id=>openEntry(null,id),
+  batch:openBatch,
+  'batch-date':batchDate,
+  'add-batch-row':()=>{
+    const row=batchRows().at(-1);
+    appendBatchRow({type:rowControl(row,'type').value,account:rowControl(row,'account').value},true);
+  },
+  'remove-batch-row':id=>{
+    if (batchRows().length<2) return;
+    $(`[data-batch-row="${id}"]`)?.remove();
+    updateBatchCount();
+  },
   entry:id=>{ const entry=book.entries.find(e=>e.id===id); if (entry) openEntry(entry); },
   'entry-type':setEntryType,
   budget:id=>openBudget(book.budgets.find(b=>b.id===id)),
@@ -419,8 +531,14 @@ document.addEventListener('change',event=>{
   if (modal.kind==='rule' && name==='type') {
     $('#modal-form [name=category]').innerHTML=categoryOptions(book,value);
   }
-  if (modal.kind==='entry' && modal.type==='transfer' && name==='account') {
-    const to=$('#modal-form [name=to]');
+  const row=event.target.closest('[data-batch-row]');
+  if (row && event.target===rowControl(row,'type')) {
+    const fields={account:rowControl(row,'account').value};
+    row.querySelector('.batch-fields').innerHTML=entryFields(value,fields,rowPrefix(row));
+  }
+  const to=row && event.target===rowControl(row,'account') ? rowControl(row,'to')
+    : modal.kind==='entry' && modal.type==='transfer' && name==='account' ? $('#modal-form [name=to]') : null;
+  if (to) {
     const chosen=to.value===value?'':to.value;
     to.innerHTML=accountOptions(book,chosen,'请选择账户',value);
   }
@@ -461,7 +579,9 @@ if (/iP(?:ad|hone|od)/.test(navigator.userAgent) || (navigator.platform==='MacIn
 }
 fileInput.addEventListener('change',inspectFile);
 dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
-dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy) dialog.close(); });
+dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal.kind!=='batch') dialog.close(); });
+window.visualViewport?.addEventListener('resize',fitBatchSheet);
+window.visualViewport?.addEventListener('scroll',fitBatchSheet);
 window.addEventListener('hashchange',()=>route(true));
 window.addEventListener('pageshow',event=>{
   if (!event.persisted) return;

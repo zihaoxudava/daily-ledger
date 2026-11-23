@@ -2,11 +2,11 @@
 
 中文个人记账网页 App。可以安装到 iPhone 主屏幕，首次联网加载后支持离线记账。
 
-[在线使用](https://daily-ledger-xz-20261123.zihaoxu802.chatgpt.site/) · [使用手册](guide/index.html)
+[在线使用](https://zihaoxudava.github.io/daily-ledger/) · [使用手册](guide/index.html)
 
 ## 功能
 
-- 支出、收入、转账和退款，支持明细搜索和筛选
+- 支出、收入、转账和退款，支持同日批量记账、明细搜索和筛选
 - 月份总览、月度和年度统计、总预算和分类组预算
 - 多账户、期初余额、分类和二级分类
 - 按周、月、年重复的账单与分期

@@ -91,6 +91,7 @@ h3 { font-size:1rem; }
 .quick-actions button:nth-child(3) .quick-icon { background:#e8effa; color:#3d5e88; }
 .quick-actions button:nth-child(4) .quick-icon { background:#faeee4; color:#8a5134; }
 .quick-panel { display:flex; flex-direction:column; justify-content:center; gap:13px; }
+.quick-heading { display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .asset-inline { display:flex; justify-content:space-between; align-items:center; gap:10px; border-top:1px solid var(--line); padding-top:13px; color:var(--muted); font-size:.87rem; }
 .asset-inline b { color:var(--ink); font-size:1.05rem; }
 .button { min-height:43px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid transparent; padding:9px 14px; border-radius:11px; font-weight:750; font-size:.92rem; text-align:center; white-space:nowrap; }
@@ -180,6 +181,23 @@ dialog::backdrop { background:#10251fb2; }
 .modal-body p { color:var(--muted); line-height:1.6; }
 .modal-foot { display:flex; gap:8px; justify-content:flex-end; align-items:center; border-top:1px solid var(--line); padding:12px 18px; background:#fff; }
 .modal-foot .primary { flex:1; }
+.entry-tools { display:flex; justify-content:flex-end; }
+dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:min(840px, calc(var(--batch-height, 100vh) - 18px)); }
+.batch-dialog #dialog-content { display:flex; flex-direction:column; max-height:inherit; min-height:0; }
+.batch-dialog .modal-head { flex:none; }
+.batch-dialog form { display:flex; flex-direction:column; min-height:0; }
+.batch-dialog .modal-body { overflow:auto; overscroll-behavior:contain; min-height:0; scroll-padding-block:12px; background:var(--bg); }
+.batch-dialog .modal-foot { flex:none; }
+.batch-date { display:flex; align-items:flex-end; gap:10px; min-width:0; }
+.batch-date .field { flex:1; }
+.batch-date input { display:block; }
+.batch-date-actions { display:flex; gap:6px; }
+.batch-rows { display:grid; gap:12px; }
+.batch-row { display:grid; gap:10px; min-width:0; border:1px solid var(--line); border-radius:15px; padding:11px 13px 13px; background:var(--paper); }
+.batch-row-tools { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:31px; }
+.batch-row-tools .link-button { color:#594a45; min-height:38px; padding:5px 0 5px 12px; }
+.batch-amount input { font-size:1.25rem; font-weight:720; }
+.batch-dialog .error { scroll-margin-block:8px; }
 .field { display:grid; gap:5px; color:#304c3b; font-size:.88rem; font-weight:650; min-width:0; }
 .field-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .form-amount input { font-size:1.62rem; font-weight:730; letter-spacing:-.04em; }
@@ -233,6 +251,11 @@ dialog::backdrop { background:#10251fb2; }
   .section-gap { margin-top:12px; }
   .bar-area { height:104px; }
   dialog { max-height:calc(100% - 22px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  dialog.batch-dialog { position:fixed; inset:auto 0 var(--batch-bottom, 0px); width:100%; margin:0; border-radius:21px 21px 0 0; max-height:calc(var(--batch-height, 100vh) - max(8px,env(safe-area-inset-top))); }
+  .batch-dialog .modal-head { padding:10px 14px; }
+  .batch-dialog .modal-body { padding:12px 14px; }
+  .batch-dialog .modal-foot { padding:10px 14px max(10px,env(safe-area-inset-bottom)); }
+  .batch-date-actions .button { padding-inline:9px; }
   .manage-row .button { padding:7px 9px; min-height:40px; }
 }
 @media (max-width:365px) {

@@ -177,7 +177,8 @@ function overview(book, ui) {
         <div><span>${icon('expense')}净支出</span>${value(expense)}</div></div>
       </section>
       <section class="panel quick-panel">
-        <h2>快速记账</h2><div class="quick-actions">${quick}</div>
+        <div class="quick-heading"><h2>快速记账</h2>${button('批量记账','batch','secondary')}</div>
+        <div class="quick-actions">${quick}</div>
         <a class="asset-inline" href="#accounts"><span>当前账户净余额</span>${value(assets)}</a>
       </section>
     </div>
@@ -219,7 +220,7 @@ export function recordsList(book,ui) {
 function records(book,ui) {
   const {query,type,account,group,all} = ui.filter;
   return header('明细','搜索、筛选和编辑账目',period(ui.month)) +
-    `<div class="inline-actions"><div class="segments"><button data-action="filter-scope" data-id="month" ${selected(all,false)}>所选月份</button><button data-action="filter-scope" data-id="all" ${selected(all,true)}>全部记录</button></div>${button('＋ 记一笔','new','primary')}</div>
+    `<div class="inline-actions"><div class="segments"><button data-action="filter-scope" data-id="month" ${selected(all,false)}>所选月份</button><button data-action="filter-scope" data-id="all" ${selected(all,true)}>全部记录</button></div>${button('＋ 记一笔','new','primary')}${button('批量记账','batch','secondary')}</div>
       <div class="filter">
         <input id="filter-query" data-filter="query" aria-label="搜索备注、金额或分类" placeholder="搜索备注、金额或分类" value="${esc(query)}" type="search">
         <select data-filter="type" aria-label="收支类型">${option('','全部类型',type)+optionMap(types,type)}</select>
