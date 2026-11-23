@@ -112,6 +112,8 @@ export function validate(book) {
   indexList(book.debts, debt=>{
     if (!Object.hasOwn(debtDirections,debt.direction) || !validText(debt.person,40) ||
       !validAmount(debt.amount) || !validDate(debt.date) || !validTime(debt.time) || !validText(debt.note,160,true)) return false;
+    if (debt.reminder!==undefined && (!debt.reminder || !validDate(debt.reminder.date) ||
+      !debt.reminder.time || !validTime(debt.reminder.time))) return false;
     indexList(debt.payments,payment=>validAmount(payment.amount) && validDate(payment.date) && validTime(payment.time) &&
       payment.date>=debt.date && validText(payment.note,160,true),60000);
     return debtRemaining(debt)>=0;

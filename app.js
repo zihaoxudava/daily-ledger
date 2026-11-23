@@ -333,11 +333,56 @@ function openDebtDetail(debt) {
     </dl>
     ${debt.note?`<p class="debt-note">${esc(debt.note)}</p>`:''}
     ${debt.attachments?.length?'<div class="note-field"><ul class="attachment-list"></ul><p class="error" role="alert" hidden></p></div>':''}
+    ${remaining?`<div class="reminder-card"><div><h3>${lent?'收款提醒':'还款提醒'}</h3>
+      <p>${debt.reminder?esc(dateAndTime(debt.reminder)):'尚未设置'}</p></div>
+      <button type="button" class="button secondary" data-action="debt-reminder" data-id="${esc(debt.id)}">${debt.reminder?'管理提醒':'设置提醒'}</button></div>`:''}
     <div><h3>${lent?'收款记录':'还款记录'}</h3>${repayments||'<p class="debt-empty">暂无记录</p>'}</div>`;
   const edit=`<button type="button" class="button neutral" data-action="edit-debt" data-id="${esc(debt.id)}">编辑借款</button>`;
   const pay=`<button type="button" class="button primary" data-action="new-debt-payment" data-id="${esc(debt.id)}">${payLabel}</button>`;
   modalFrame({kind:'info',debtId:debt.id},esc(debt.person),html,edit+(remaining?pay:submit('完成')));
   if (debt.attachments?.length) mountNote(dialog,debt.attachments);
+}
+
+function updateReminderStatus() {
+  const status=$('#reminder-status');
+  if (!status || !android?.reminderState) return;
+  const state=android.reminderState();
+  status.textContent=!(state&1) ? '开启通知后，手机才能收到提醒。' :
+    state&2 ? '系统通知已开启，可按设定时间提醒。' : '系统通知已开启。开启准时提醒可减少系统延迟。';
+  $('#reminder-notifications').hidden=!!(state&1);
+  $('#reminder-exact').hidden=!!(state&2);
+}
+
+function openDebtReminder(debt) {
+  const reminder=debt.reminder;
+  const tomorrow=new Date(`${today()}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate()+1);
+  const title=debt.direction==='lent'?'收款提醒':'还款提醒';
+  modalFrame({kind:'debt-reminder',id:debt.id},title,`
+    <p>${esc(debt.person)} · 待${debt.direction==='lent'?'收回':'归还'} ${money(debtRemaining(debt))}</p>
+    <div class="field-row date-time-fields">${label('提醒日期',dateInput('date',reminder?.date ?? tomorrow.toISOString().slice(0,10)))}
+      ${label('提醒时间','<input name="time" type="time" value="'+esc(reminder?.time ?? '09:00')+'" required>')}</div>
+    ${android?`<p id="reminder-status" aria-live="polite"></p>
+      <div class="actions"><button type="button" id="reminder-notifications" class="button secondary" data-action="reminder-settings" data-id="notifications">开启通知</button>
+      <button type="button" id="reminder-exact" class="button neutral" data-action="reminder-settings" data-id="exact">允许准时提醒</button></div>`:
+      '<p>保存后可下载日历文件，添加到手机日历接收通知。改期或结清时可在日历里调整原事件。</p>'}`,cancel+submit('保存提醒'));
+  const actions=$('#modal-form .modal-body');
+  if (reminder) actions.insertAdjacentHTML('beforeend',`<div class="actions">
+    ${android?'':'<button type="button" class="button secondary" data-action="reminder-calendar">下载日历提醒</button>'}
+    <button type="button" class="button neutral" data-action="reminder-remove">取消提醒</button></div>`);
+  updateReminderStatus();
+}
+
+function reminderCalendar() {
+  const debt=debtOf(book,modal.id);
+  const stamp=date=>date.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z');
+  const start=new Date(dateAndTime(debt.reminder).replace(' ','T'));
+  const title=debt.direction==='lent'?'日常账本 收款提醒':'日常账本 还款提醒';
+  const calendar=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Daily Ledger//Debt Reminder//ZH','BEGIN:VEVENT',
+    `UID:${debt.id}@daily-ledger`,`DTSTAMP:${stamp(new Date())}`,`DTSTART:${stamp(start)}`,
+    `DTEND:${stamp(new Date(start.getTime()+15*60_000))}`,`SUMMARY:${title}`,
+    'BEGIN:VALARM','ACTION:DISPLAY','TRIGGER:PT0M',`DESCRIPTION:${title}`,'END:VALARM','END:VEVENT','END:VCALENDAR',''].join('\r\n');
+  return download(title+'.ics',calendar,'text/calendar;charset=utf-8');
 }
 
 function openDebtPayment(debt,payment) {
@@ -553,7 +598,8 @@ const save = {
     const existing=debtOf(current,s.id);
     if (s.id) must(existing,'这项借款已被移除。');
     const debt={id:s.id ?? uid(),direction:get('direction'),person:get('person'),amount:parseMoney(get('amount')),
-      date:get('date'),payments:existing?.payments ?? [],...note,...optionalTime(get)};
+      date:get('date'),payments:existing?.payments ?? [],...note,...optionalTime(get),
+      ...(existing?.reminder?{reminder:existing.reminder}:{})};
     must(debt.person,'请填写对方姓名。');
     must(validDate(debt.date),'请填写有效日期。');
     must(debtRemaining(debt)>=0,'本金不能小于已记录的还款金额。');
@@ -569,6 +615,14 @@ const save = {
     must(validDate(payment.date) && payment.date>=debt.date,'请填写有效日期，且不早于借款日期。');
     must(payment.amount<=debtRemaining(debt)+(previous?.amount ?? 0),'金额不能超过这项借款的剩余金额。');
     upsert(debt.payments,payment);
+  },
+  'debt-reminder'(current,s,get) {
+    const debt=debtOf(current,s.id);
+    must(debt && debtRemaining(debt)>0,'这项借款已结清或移除。');
+    const date=get('date'),time=get('time');
+    must(validDate(date) && time && validTime(time) &&
+      new Date(`${date}T${time}`).getTime()>Date.now(),'请选择未来的提醒日期和时间。');
+    debt.reminder={date,time};
   },
   budget(current,s,get) {
     const item={id:s.id ?? uid(),month:get('month'),group:get('group'),amount:parseMoney(get('amount'))};
@@ -671,6 +725,12 @@ async function submitModal(event) {
         ui.month=date.slice(0,7);
         ui.limit=50;
       },files);
+    } else if (state.kind==='debt-reminder') {
+      book=await writeBook(current=>save[state.kind](current,state,get));
+      channel?.postMessage('change');
+      render();
+      openDebtReminder(debtOf(book,state.id));
+      tell(android?'已保存提醒':'已保存，可下载日历提醒',true);
     } else {
       const files=new Map();
       const note=noteDraft(dialog) ? readNote(dialog,get('note'),files) : undefined;
@@ -730,6 +790,22 @@ const actions = {
   batch:openBatch,
   'new-debt':direction=>openDebt(null,direction),
   'debt-detail':id=>{ const debt=debtOf(book,id); if (debt) openDebtDetail(debt); },
+  'debt-reminder':id=>{ const debt=debtOf(book,id); if (debt && debtRemaining(debt)>0) openDebtReminder(debt); },
+  'reminder-calendar':reminderCalendar,
+  'reminder-settings':id=>android?.reminderSettings(id),
+  'reminder-remove':async()=>{
+    const id=modal.id;
+    busy=true;
+    try {
+      await commit(current=>{
+        const debt=debtOf(current,id);
+        if (debt) delete debt.reminder;
+      },'提醒已取消');
+    } finally {
+      busy=false;
+      flushRefresh();
+    }
+  },
   'edit-debt':id=>{ const debt=debtOf(book,id); if (debt) openDebt(debt); },
   'new-debt-payment':id=>{ const debt=debtOf(book,id); if (debt && debtRemaining(debt)>0) openDebtPayment(debt); },
   'edit-debt-payment':id=>{
@@ -985,6 +1061,7 @@ window.addEventListener('online',()=>{
 window.addEventListener('offline',offlineStatus);
 window.addEventListener('nativeforeground',()=>{
   if (!dialog.open) checkUpdate();
+  updateReminderStatus();
 });
 window.addEventListener('beforeinstallprompt',event=>{
   if (isInstalled() || typeof event.prompt!=='function') return;

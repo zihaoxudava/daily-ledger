@@ -14,12 +14,18 @@ import java.util.Set;
 import java.util.UUID;
 
 final class LedgerStorage {
+    private static LedgerStorage instance;
     private final AtomicFile ledger;
     private final File attachments;
     private final File staging;
     private JSONObject loaded;
 
-    LedgerStorage(File filesDir, File cacheDir) throws IOException {
+    static synchronized LedgerStorage get(android.content.Context context) throws IOException {
+        if (instance==null) instance=new LedgerStorage(context.getFilesDir(),context.getCacheDir());
+        return instance;
+    }
+
+    private LedgerStorage(File filesDir, File cacheDir) throws IOException {
         ledger = new AtomicFile(new File(filesDir, "ledger.json"));
         attachments = new File(filesDir, "attachments");
         staging = new File(cacheDir, "ledger-staging");

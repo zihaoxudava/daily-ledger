@@ -351,7 +351,8 @@ function debts(book) {
     const total=items.reduce((sum,item)=>sum+item.remaining,0);
     const rows=items.map(({debt,remaining})=>`
       <button type="button" class="debt-row" data-action="debt-detail" data-id="${esc(debt.id)}">
-        <span><strong>${esc(debt.person)}</strong><small>${esc(dateAndTime(debt))} · 本金 ${money(debt.amount)}</small></span>
+        <span><strong>${esc(debt.person)}</strong><small>${esc(dateAndTime(debt))} · 本金 ${money(debt.amount)}</small>
+          ${remaining&&debt.reminder?`<small>提醒 · ${esc(dateAndTime(debt.reminder))}</small>`:''}</span>
         <span class="debt-row-amount"><strong class="number">${money(remaining)}</strong><small>${remaining?remainingLabel:'已结清'}</small></span>
       </button>`).join('');
     return `<section class="panel">

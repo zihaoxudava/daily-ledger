@@ -1,13 +1,17 @@
 package com.zihaoxudava.dailyledger;
 
 import android.app.Activity;
+import android.Manifest;
 import android.app.DownloadManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Environment;
+import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -43,7 +47,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
-        try { storage=new LedgerStorage(getFilesDir(),getCacheDir()); }
+        try { storage=LedgerStorage.get(this); }
         catch (Exception error) {
             TextView message=new TextView(this);
             message.setText("无法打开本机账本。请检查设备可用空间后重新打开。");
@@ -75,12 +79,31 @@ public final class MainActivity extends Activity {
                 return true;
             }
         });
-        web.loadUrl("https://"+HOST+"/www/");
+        web.loadUrl("https://"+HOST+"/www/"+(getIntent().getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false)?"#debts":""));
     }
 
     @Override protected void onResume() {
         super.onResume();
         if (web!=null) web.evaluateJavascript("window.dispatchEvent(new Event('nativeforeground'))",null);
+        if (storage!=null) syncReminders();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (web!=null && intent.getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false))
+            web.evaluateJavascript("if(!document.querySelector('dialog[open]'))location.hash='debts';",null);
+    }
+
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
+        super.onRequestPermissionsResult(request,permissions,results);
+        if (request==3 && web!=null) {
+            syncReminders();
+            web.evaluateJavascript("window.dispatchEvent(new Event('nativeforeground'))",null);
+        }
+    }
+
+    private void syncReminders() {
+        new Thread(()->DebtAlarmReceiver.sync(getApplicationContext(),false),"ledger-reminders").start();
     }
 
     @Override public void onBackPressed() {
@@ -249,7 +272,7 @@ public final class MainActivity extends Activity {
             return answer(()->{ storage.append(token,id,content); return true; });
         }
         @JavascriptInterface public String commit(String token,String book,String sizes) {
-            return answer(()->{ storage.commit(token,book,sizes); return true; });
+            return answer(()->{ storage.commit(token,book,sizes); DebtAlarmReceiver.sync(MainActivity.this,false); return true; });
         }
         @JavascriptInterface public void discard(String token) { storage.discard(token); }
         @JavascriptInterface public int versionCode() {
@@ -258,6 +281,26 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void openUpdate(int version) {
             if (version>versionCode()) runOnUiThread(()->downloadUpdate(version));
+        }
+        @JavascriptInterface public int reminderState() {
+            return (DebtAlarmReceiver.enabled(MainActivity.this)?1:0)+(DebtAlarmReceiver.exact(MainActivity.this)?2:0);
+        }
+        @JavascriptInterface public void reminderSettings(String kind) {
+            runOnUiThread(()->{
+                try {
+                    if ("exact".equals(kind) && Build.VERSION.SDK_INT>=31) {
+                        startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+getPackageName())));
+                    } else if ("notifications".equals(kind)) {
+                        SharedPreferences prefs=getPreferences(MODE_PRIVATE);
+                        if (Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED &&
+                            (!prefs.getBoolean("notification-asked",false) || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+                            prefs.edit().putBoolean("notification-asked",true).apply();
+                            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},3);
+                        } else startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName()));
+                    }
+                } catch (Exception error) { toast("请在系统设置中开启日常账本的通知权限。"); }
+            });
         }
         @JavascriptInterface public String exportFile(String token,String name,String mime) {
             return answer(()->{
