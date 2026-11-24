@@ -8,6 +8,8 @@ function result(reply) {
 }
 
 export const readNativeBook = () => result(android.readBook());
+export const pendingPayments = () => android?.pendingPayments ? result(android.pendingPayments()) : [];
+export const acknowledgePayments = ids => result(android.ackPayments(JSON.stringify(ids)));
 
 async function stageFile(token,id,file) {
   for (let start=0;start<file.size;start+=192*1024) {

@@ -10,6 +10,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if (!$env:LEDGER_SIGNING_PASSWORD) { throw 'Set LEDGER_SIGNING_PASSWORD for the release signing key.' }
+$WorkDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkDir)
 $env:JAVA_HOME = $JavaHome
 $env:Path = (Join-Path $JavaHome 'bin') + [IO.Path]::PathSeparator + $env:Path
 

@@ -18,6 +18,14 @@ export const initial = () => ({
   savings:[], savingDeposits:[],
 });
 
+export const ledgerStyles = ['jade','ocean','orchid','sand','rose','slate'];
+export const ledgerIcons = ['wallet','reports','overview','guide','plan','savings'];
+export const wallpaperPages = ['overview','records','reports','report-detail','plan','debts','settings',
+  'accounts','categories','files','updates','months','savings','saving-detail','ledgers','appearance','auto'];
+export const wallpaperVideos = ['video/mp4','video/webm','video/quicktime'];
+export const wallpaperImages = ['image/jpeg','image/png','image/gif','image/webp','image/avif','image/bmp','image/heic','image/heif'];
+export const ledgerFor = (root,id) => root.ledgers?.find(item=>item.id===id)?.data ?? root;
+
 function withDefaults(book) {
   if (book.debts===undefined) book={...book,debts:[]};
   if (book.savings===undefined) book={...book,savings:[]};
@@ -128,6 +136,35 @@ function indexList(items, predicate, limit) {
 }
 
 export function validate(book) {
+  book=validateLedger(book);
+  const ledgers=indexList(book.ledgers ?? [],item=>item.id!=='main' && validText(item.name,28) &&
+    validText(item.description,100,true) && ledgerStyles.includes(item.style) && ledgerIcons.includes(item.icon),20);
+  for (const item of ledgers.values()) {
+    if (item.data?.ledgers!==undefined || item.data?.wallpapers!==undefined || item.data?.autoCapture!==undefined) {
+      throw new Error('独立账本结构无效。');
+    }
+    item.data=validateLedger(item.data);
+  }
+  const wallpapers=book.wallpapers ?? {};
+  if (typeof wallpapers!=='object' || Array.isArray(wallpapers) ||
+      Object.entries(wallpapers).some(([page,wall])=>!wallpaperPages.includes(page) || !wall ||
+        !(wall.color==='' || /^#[a-fA-F0-9]{6}$/.test(wall.color)) ||
+        !Number.isInteger(wall.shade) || wall.shade<0 || wall.shade>85 || !['cover','contain'].includes(wall.fit) ||
+        !['center','top','bottom'].includes(wall.position) ||
+        (wall.media!==undefined && ![...wallpaperVideos,...wallpaperImages].includes(wall.media?.type)))) {
+    throw new Error('页面背景设置无效。');
+  }
+  if (book.autoCapture!==undefined) {
+    const config=book.autoCapture;
+    if (!config || typeof config.enabled!=='boolean' || !['main',...ledgers.keys()].includes(config.ledger) ||
+        !['wechat','alipay'].every(source=>typeof config[source]==='string' && (config[source]==='' || validId(config[source])))) {
+      throw new Error('自动记账设置无效。');
+    }
+  }
+  return book;
+}
+
+function validateLedger(book) {
   if (!book || book.version !== 1) throw new Error('请选择日常账本格式的 JSON 备份。');
   book=withDefaults(book);
   const groups = indexList(book.groups, group => ['expense','income'].includes(group.type) && validText(group.name,28) && validText(group.icon,12), 300);

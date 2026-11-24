@@ -44,6 +44,7 @@ public final class MainActivity extends Activity {
     private WebView web;
     private ValueCallback<Uri[]> filePicker;
     private String exportToken;
+    private boolean exportingBackup;
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -79,7 +80,9 @@ public final class MainActivity extends Activity {
                 return true;
             }
         });
-        web.loadUrl("https://"+HOST+"/www/"+(getIntent().getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false)?"#debts":""));
+        String debtLedger=getIntent().getStringExtra(DebtAlarmReceiver.EXTRA_LEDGER);
+        web.loadUrl("https://"+HOST+"/www/"+(getIntent().getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false)
+            ?"?debtLedger="+Uri.encode(debtLedger==null?"main":debtLedger)+"#debts":""));
     }
 
     @Override protected void onResume() {
@@ -90,8 +93,11 @@ public final class MainActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (web!=null && intent.getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false))
-            web.evaluateJavascript("if(!document.querySelector('dialog[open]'))location.hash='debts';",null);
+        if (web!=null && intent.getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false)) {
+            String ledger=intent.getStringExtra(DebtAlarmReceiver.EXTRA_LEDGER);
+            web.evaluateJavascript("window.dispatchEvent(new CustomEvent('nativedebtopen',{detail:"+
+                JSONObject.quote(ledger==null?"main":ledger)+"}));",null);
+        }
     }
 
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
@@ -122,7 +128,9 @@ public final class MainActivity extends Activity {
         }
         if (request==EXPORT_FILE && exportToken!=null) {
             String token=exportToken;
+            boolean backup=exportingBackup;
             exportToken=null;
+            exportingBackup=false;
             final Uri uri=result==RESULT_OK && data!=null ? data.getData() : null;
             if (uri==null) { storage.discard(token); return; }
             new Thread(()->{
@@ -132,6 +140,9 @@ public final class MainActivity extends Activity {
                     LedgerStorage.copy(in,out);
                     out.flush();
                     toast("已保存到所选位置。");
+                    if (backup) runOnUiThread(()->{
+                        if (web!=null) web.evaluateJavascript("window.dispatchEvent(new Event('nativebackupcomplete'))",null);
+                    });
                 } catch (Exception error) { toast("保存文件失败，请检查空间后重试。"); }
                 finally { storage.discard(token); }
             },"ledger-export").start();
@@ -267,6 +278,17 @@ public final class MainActivity extends Activity {
     }
 
     public final class Bridge {
+        @JavascriptInterface public boolean paymentPermission() { return PaymentListener.allowed(MainActivity.this); }
+        @JavascriptInterface public String pendingPayments() { return answer(()->PaymentListener.pending(MainActivity.this)); }
+        @JavascriptInterface public String ackPayments(String ids) {
+            return answer(()->{ PaymentListener.acknowledge(MainActivity.this,ids); return true; });
+        }
+        @JavascriptInterface public void paymentSettings() {
+            runOnUiThread(()->{
+                try { startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)); }
+                catch (Exception error) { toast("请在系统设置中搜索通知访问权限。"); }
+            });
+        }
         @JavascriptInterface public String readBook() { return answer(storage::readBook); }
         @JavascriptInterface public String begin() { return answer(storage::begin); }
         @JavascriptInterface public String append(String token,String id,String content) {
@@ -317,12 +339,14 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     exportToken=token;
+                    exportingBackup="application/json".equals(mime) && name.startsWith("日常账本-备份-");
                     try {
                         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                             .setType(mime.contains("/")?mime:"application/octet-stream").putExtra(Intent.EXTRA_TITLE,name);
                         startActivityForResult(intent,EXPORT_FILE);
                     } catch (Exception error) {
                         exportToken=null;
+                        exportingBackup=false;
                         storage.discard(token);
                         toast("无法打开系统文件保存窗口。");
                     }

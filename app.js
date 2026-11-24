@@ -1,14 +1,15 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
-import { today, shiftMonth, uid, money, parseMoney, readBook, readBackup, writeBook, applyRecurring, hasDueRecurring, validate,
-  validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf } from './store.js';
+import { today, shiftMonth, uid, money, parseMoney, readBook as readRoot, readBackup, writeBook as writeRoot, applyRecurring, hasDueRecurring, validate,
+  validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf,
+  initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, readAttachment, MAX_AMOUNT } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
-import { buildBackup, restoreAttachmentFiles, maxBackupBytes } from './attachments.js';
+import { buildBackup, restoreAttachmentFiles, attachmentFromFile } from './attachments.js';
 import { noteFields, noteDraft, mountNote, readNote } from './note.js';
-import { android } from './native.js';
+import { android, pendingPayments, acknowledgePayments } from './native.js';
 import { pages, nav, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
-  categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth } from './views.js';
+  categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth, wallpaperPageNames } from './views.js';
 
 const $ = selector => document.querySelector(selector);
 const content = $('#content');
@@ -27,9 +28,49 @@ const ui = {
   monthOverviewYear:Number(today().slice(0,4)),
   entrySelection:null,
   drillLimit:50, savingDays:14, depositLimit:30,
+  ledgerId:'main',
 };
 const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
+const ledgerKey='daily-ledger-active-book';
+const backupReminderKey='daily-ledger-backup-timestamp';
+let backupStart=Date.now();
+try { ui.ledgerId=localStorage.getItem(ledgerKey) || 'main'; } catch {}
+let debtLaunch=new URL(location.href).searchParams.get('debtLedger');
+if (debtLaunch && android) history.replaceState(history.state,'',location.pathname+location.hash);
+else debtLaunch=null;
+try {
+  const stored=Number(localStorage.getItem(backupReminderKey));
+  if (stored>0 && stored<=Date.now()) backupStart=stored;
+  else localStorage.setItem(backupReminderKey,String(backupStart));
+} catch {}
+
+function markBackup() {
+  backupStart=Date.now();
+  try { localStorage.setItem(backupReminderKey,String(backupStart)); } catch {}
+  syncBackupReminder();
+}
+
+function syncBackupReminder() {
+  $('#backup-reminder').hidden=!(book && page==='overview' && Date.now()-backupStart>=30*86_400_000);
+}
+
+function useRoot(root) {
+  ui.root=root;
+  if (ui.ledgerId!=='main' && !root.ledgers?.some(item=>item.id===ui.ledgerId)) ui.ledgerId='main';
+  book=ledgerFor(root,ui.ledgerId);
+  return book;
+}
+
+async function writeBook(change,files) {
+  const ledgerId=ui.ledgerId;
+  return useRoot(await writeRoot(root=>{
+    if (ledgerId==='main') return change(root);
+    const item=root.ledgers?.find(item=>item.id===ledgerId);
+    must(item,'当前账本已移除，请重新选择。');
+    item.data=change(item.data) ?? item.data;
+  },files));
+}
 let pendingRefresh=0, refreshing=false;
 let runningActions=0, pickingFile=false, updateScroll;
 let lastSavingsDate;
@@ -47,17 +88,58 @@ try {
 } catch {}
 let installPrompt;
 const isInstalled=()=>!!android || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let requestedPersistence=false;
+function requestPersistence() {
+  if (android || requestedPersistence || !navigator.storage?.persist) return;
+  requestedPersistence=true;
+  navigator.storage.persist().catch(()=>{});
+}
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
 const motion = matchMedia('(prefers-reduced-motion: no-preference)');
 let pageAnimation, toastAnimation;
+let wallKey,wallURL,wallTask=0;
+const wallLayer=$('#page-wallpaper');
+
+function syncWallpaper() {
+  const wall=ui.root?.wallpapers?.[page];
+  const key=JSON.stringify([page,wall,motion.matches]);
+  if (key===wallKey) return;
+  wallKey=key;
+  const task=++wallTask;
+  wallLayer.replaceChildren();
+  if (wallURL) URL.revokeObjectURL(wallURL);
+  wallURL=undefined;
+  const active=Boolean(wall?.color || wall?.media);
+  document.body.classList.toggle('has-wallpaper',active);
+  wallLayer.style.backgroundColor=wall?.color || '';
+  wallLayer.style.setProperty('--wall-shade',String((wall?.shade ?? 0)/100));
+  if (!wall?.media) return;
+  const video=wallpaperVideos.includes(wall.media.type);
+  if (!motion.matches && (video || /image\/(gif|webp|avif|png)/.test(wall.media.type))) return;
+  readAttachment(wall.media).then(file=>{
+    if (task!==wallTask) return;
+    const media=document.createElement(video?'video':'img');
+    if (video) {
+      media.autoplay=media.loop=media.muted=media.playsInline=true;
+      media.setAttribute('muted','');
+    } else media.alt='';
+    media.style.objectFit=wall.fit;
+    media.style.objectPosition=wall.position;
+    media.addEventListener('error',()=>{ if (task===wallTask) media.remove(); },{once:true});
+    wallURL=URL.createObjectURL(file);
+    media.src=wallURL;
+    wallLayer.replaceChildren(media);
+  }).catch(()=>{});
+}
+motion.addEventListener?.('change',syncWallpaper);
 
 function enter(element, distance, duration) {
   if (!motion.matches || !element.animate) return;
   return element.animate([
-    {opacity:.76,transform:`translateY(${distance}px)`},
+    {opacity:.86,transform:`translateY(${distance}px) scale(.995)`},
     {opacity:1,transform:'translateY(0)'},
-  ],{duration,easing:'cubic-bezier(.2, 0, 0, 1)'});
+  ],{duration,easing:'cubic-bezier(.2,.75,.25,1)'});
 }
 
 function tell(message, success=false) {
@@ -109,6 +191,11 @@ function render() {
     content.innerHTML = `<section class="panel system-message"><h1>无法打开本机账本</h1><p>${esc(storageError)}</p><p>请退出无痕模式，并从添加到主屏幕的图标重新打开。</p><p><button class="button primary" data-action="reload" type="button">重试</button></p></section>`;
   } else if (book) {
     content.innerHTML = pages[page](book,ui);
+    const name=ui.root.ledgers?.find(item=>item.id===ui.ledgerId)?.name;
+    $('#active-ledger').textContent=name ?? '';
+    $('#active-ledger').hidden=!name;
+    syncWallpaper();
+    syncBackupReminder();
     if (page==='savings' || page==='saving-detail') lastSavingsDate=today();
     if (updateScroll!==undefined) {
       const y=updateScroll;
@@ -130,22 +217,25 @@ async function flushRefresh() {
   pendingRefresh=0;
   refreshing=true;
   try {
-    const data = await readBook();
+    const data = await readRoot();
     if (dialog.open || busy) {
       pendingRefresh=Math.max(pendingRefresh,request);
       return;
     }
     const date=today();
-    if (request===2 && hasDueRecurring(data,date)) {
+    const scopes=root=>[root,...(root.ledgers ?? []).map(item=>item.data)];
+    if (request===2 && scopes(data).some(ledger=>hasDueRecurring(ledger,date))) {
       let added=0;
-      book = await writeBook(current => {
-        const before=current.entries.length;
-        applyRecurring(current,date);
-        added=current.entries.length-before;
-      });
+      useRoot(await writeRoot(current => {
+        for (const ledger of scopes(current)) {
+          const before=ledger.entries.length;
+          applyRecurring(ledger,date);
+          added+=ledger.entries.length-before;
+        }
+      }));
       if (added>0) tell(`已自动记入 ${added} 笔到期账单`);
     } else {
-      book=data;
+      useRoot(data);
     }
     storageError=undefined;
   } catch (error) {
@@ -153,7 +243,9 @@ async function flushRefresh() {
   } finally {
     refreshing=false;
     if (!dialog.open && !busy) render();
+    openDebtFromReminder();
     flushRefresh();
+    capturePayments();
   }
 }
 
@@ -171,6 +263,158 @@ function modalFrame(state, title, inner, actions) {
 const cancel = '<button type="button" class="button neutral" data-action="close">取消</button>';
 const submit = text => `<button class="button primary" type="submit">${text}</button>`;
 const remove = text => `<button class="button danger" data-action="ask-delete" type="button">${text}</button>`;
+
+const ledgerStyleNames=['翡翠','海蓝','浅紫','暖沙','玫瑰','石墨'];
+const ledgerIconNames=['钱包','统计','分类','手册','日历','存款'];
+const styleOptions=Object.fromEntries(ledgerStyles.map((id,i)=>[id,ledgerStyleNames[i]]));
+const iconOptions=Object.fromEntries(ledgerIcons.map((id,i)=>[id,ledgerIconNames[i]]));
+
+function editLedger(id) {
+  const item=ui.root.ledgers?.find(record=>record.id===id);
+  modalFrame({kind:'ledger',id},item?'编辑账本':'新建独立账本',
+    `${label('名称',textInput('name',item?.name,28,true,'例如 公司财务'))}
+     ${label('说明（选填）',textInput('description',item?.description,100))}
+     <div class="field-grid">
+     ${label('卡片颜色',`<select name="style">${optionMap(styleOptions,item?.style)}</select>`)}
+     ${label('图标',`<select name="icon">${optionMap(iconOptions,item?.icon)}</select>`)}
+     </div><div class="ledger-look" aria-hidden="true"><span class="ledger-icon"></span></div>`,
+    cancel+submit('保存'));
+  updateLedgerLook();
+}
+
+function updateLedgerLook() {
+  const form=$('#modal-form');
+  const preview=form.querySelector('.ledger-look');
+  preview.className=`ledger-look ledger-${form.elements.namedItem('style').value}`;
+  preview.querySelector('.ledger-icon').innerHTML=icon(form.elements.namedItem('icon').value);
+}
+
+function selectLedger(id, target='overview') {
+  if (id!=='main' && !ui.root.ledgers?.some(item=>item.id===id)) return;
+  ui.ledgerId=id;
+  try { localStorage.setItem(ledgerKey,id); } catch {}
+  useRoot(ui.root);
+  ui.filter={query:'',type:'',account:'',group:'',all:false};
+  ui.entrySelection=null;
+  ui.openGroups.clear();
+  ui.limit=50;
+  if (location.hash===`#${target}`) route(true);
+  else location.hash=target;
+}
+
+function openDebtFromReminder() {
+  if (!debtLaunch || !book || dialog.open || busy) return;
+  const id=debtLaunch;
+  debtLaunch=null;
+  selectLedger(id,'debts');
+}
+
+function openWallpaper(id) {
+  if (!Object.hasOwn(wallpaperPageNames,id)) return;
+  const wall=ui.root.wallpapers?.[id];
+  const types=[...wallpaperImages,...wallpaperVideos].join(',');
+  modalFrame({kind:'wallpaper',id},`${wallpaperPageNames[id]}背景`,
+    `<div class="field-grid">
+      ${label('底色',`<input type="color" name="color" value="${wall?.color || '#e8efe9'}">`)}
+      <label class="option-check"><input type="checkbox" name="use-color"${wall?.color?' checked':''}>使用自定义底色</label>
+    </div>
+    ${label('图片、动图或视频',`<input type="file" name="media" accept="${types},.mov,.mp4,.webm">`)}
+    ${wall?.media?`<label class="option-check"><input type="checkbox" name="remove-media">移除 ${esc(wall.media.name)}</label>`:''}
+    <div class="field-grid">
+      ${label('显示方式',`<select name="fit">${optionMap({cover:'铺满屏幕',contain:'完整显示'},wall?.fit)}</select>`)}
+      ${label('对齐',`<select name="position">${optionMap({center:'居中',top:'靠上',bottom:'靠下'},wall?.position)}</select>`)}
+    </div>
+    ${label('内容可读性 · 浅色遮罩',`<input type="range" name="shade" min="0" max="85" value="${wall?.shade ?? 32}">`)}
+    <p class="muted">视频会静音循环播放。优先使用设备支持的 MP4 视频。</p>`,
+    `${wall?'<button type="submit" value="reset" class="button neutral">恢复默认</button>':''}${cancel}${submit('保存')}`);
+}
+
+function configureAuto() {
+  if (!android?.paymentSettings) return;
+  const config=ui.root.autoCapture;
+  const choices={main:'主账本',...Object.fromEntries((ui.root.ledgers ?? []).map(item=>[item.id,item.name]))};
+  modalFrame({kind:'auto-capture'},'配置自动记账',
+    `<label class="option-check"><input type="checkbox" name="enabled"${config?.enabled?' checked':''}>启用微信／支付宝付款识别</label>
+    ${label('存入账本',`<select name="ledger">${optionMap(choices,config?.ledger ?? ui.ledgerId)}</select>`)}
+    ${label('微信付款记到账户','<select name="wechat"></select>')}
+    ${label('支付宝付款记到账户','<select name="alipay"></select>')}
+    <p class="muted">只记录启用的平台，分类先记入其他支出。可以在明细里修改分类或账户。</p>`,
+    cancel+submit('保存设置'));
+  updateAutoAccounts(config);
+}
+
+function updateAutoAccounts(config) {
+  const form=$('#modal-form');
+  const ledger=ledgerFor(ui.root,form.elements.namedItem('ledger').value);
+  for (const source of ['wechat','alipay']) {
+    const chosen=config ? config[source] : ledger.accounts.find(item=>!item.archived &&
+      item.name.includes(source==='wechat'?'微信':'支付宝'))?.id;
+    form.elements.namedItem(source).innerHTML=accountOptions(ledger,chosen,'关闭该平台');
+  }
+}
+
+let capturing=false;
+async function capturePayments() {
+  if (!android?.pendingPayments || capturing || !book || busy || refreshing || dialog.open ||
+      document.visibilityState==='hidden') return;
+  capturing=true;
+  try {
+    const events=pendingPayments();
+    if (!events.length) return;
+    const settled=[];
+    let added=0;
+    const root=await writeRoot(current=>{
+      const config=current.autoCapture;
+      const targets=new Map([['main',current],...(current.ledgers ?? []).map(item=>[item.id,item.data])]);
+      const lookup=new Map();
+      for (const item of events) {
+        if (!config?.enabled || !targets.has(item.ledger)) { settled.push(item.id); continue; }
+        const target=targets.get(item.ledger);
+        let ids=lookup.get(target);
+        if (!ids) { ids=new Set(target.entries.map(entry=>entry.id)); lookup.set(target,ids); }
+        if (ids.has(item.id)) { settled.push(item.id); continue; }
+        const active=id=>target.accounts.some(account=>account.id===id && !account.archived);
+        const account=active(item.account) ? item.account
+          : config.ledger===item.ledger && active(config[item.source]) ? config[item.source] : '';
+        const expense=cat=>!cat.archived && groupOf(target,cat.group)?.type==='expense';
+        const category=target.categories.find(cat=>expense(cat) && cat.name==='其他支出')
+          ?? target.categories.find(cat=>expense(cat) && groupOf(target,cat.group)?.name==='其他支出');
+        const when=new Date(item.at);
+        const date=[when.getFullYear(),when.getMonth()+1,when.getDate()].map(n=>String(n).padStart(2,'0')).join('-');
+        const time=[when.getHours(),when.getMinutes()].map(n=>String(n).padStart(2,'0')).join(':');
+        if (!validDate(date) || !Number.isSafeInteger(item.amount) || item.amount<1 || item.amount>MAX_AMOUNT) {
+          settled.push(item.id);
+          continue;
+        }
+        if (!account || target.entries.length>=60000) continue;
+        let cat=category;
+        if (!cat) {
+          let group=target.groups.find(group=>group.type==='expense');
+          if (!group) {
+            if (target.groups.length>=300) continue;
+            group={id:uid(),type:'expense',name:'其他支出',icon:'🧾'};
+            target.groups.push(group);
+          }
+          if (target.categories.length>=2000) continue;
+          cat={id:uid(),name:'其他支出',group:group.id,archived:false};
+          target.categories.push(cat);
+        }
+        target.entries.push({id:item.id,date,time,type:'expense',amount:item.amount,account,to:'',category:cat.id,
+          note:`${item.source==='wechat'?'微信':'支付宝'}付款 · 自动记账`});
+        settled.push(item.id);
+        ids.add(item.id);
+        added++;
+      }
+    });
+    useRoot(root);
+    if (settled.length) acknowledgePayments(settled);
+    if (added) {
+      if (!dialog.open && !busy) render();
+      tell(`已自动记入 ${added} 笔付款`,true);
+    }
+  } catch (error) { console.warn('Payment queue could not be imported',error); }
+  finally { capturing=false; }
+}
 
 function errorInModal(message) {
   const element = $('#modal-error');
@@ -643,8 +887,9 @@ function must(condition,message) {
   if (!condition) throw new Error(message);
 }
 
-async function commit(change, message, afterWrite, files) {
-  book=await writeBook(change,files);
+async function commit(change, message, afterWrite, files, global=false) {
+  if (global) useRoot(await writeRoot(change,files));
+  else await writeBook(change,files);
   afterWrite?.();
   channel?.postMessage('change');
   dialog.close();
@@ -810,6 +1055,7 @@ async function submitModal(event) {
   event.preventDefault();
   if (busy) return;
   if (modal.kind==='info') { dialog.close(); return; }
+  requestPersistence();
   const data=new FormData(event.target);
   const get=name=>String(data.get(name) ?? '').trim();
   const state=modal;
@@ -825,7 +1071,43 @@ async function submitModal(event) {
         if (state.collection==='savings') current.savingDeposits=current.savingDeposits.filter(item=>item.plan!==state.id);
       },'已删除');
     } else if (state.kind==='restore') {
-      await commit(()=>state.data,'已恢复完整备份',undefined,state.files);
+      await commit(()=>state.data,'已恢复完整备份',()=>selectLedger('main'),state.files,true);
+    } else if (state.kind==='ledger') {
+      const name=get('name');
+      must(name,'请填写账本名称。');
+      await commit(current=>{
+        const items=current.ledgers ??= [];
+        const item=items.find(record=>record.id===state.id);
+        if (state.id) must(item,'该账本已移除。');
+        must(name!=='主账本' && !items.some(record=>record.name===name && record.id!==state.id),'该名称已存在。');
+        upsert(items,{id:state.id ?? uid(),name,description:get('description'),style:get('style'),icon:get('icon'),data:item?.data ?? initial()});
+      },'已保存账本',undefined,undefined,true);
+    } else if (state.kind==='wallpaper') {
+      const file=data.get('media');
+      let media;
+      const files=new Map();
+      if (submitter?.value!=='reset' && file?.name) {
+        const formats=[...wallpaperImages,...wallpaperVideos];
+        const guessed={mov:'video/quicktime',mp4:'video/mp4',webm:'video/webm',gif:'image/gif',png:'image/png',
+          jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
+        const type=formats.includes(file.type)?file.type:guessed[file.name.split('.').pop().toLowerCase()];
+        must(formats.includes(type),'请选择支持的图片、动图或视频文件。');
+        media={...attachmentFromFile(file,`wall_${uid()}`),type};
+        files.set(media.id,file);
+      }
+      await commit(current=>{
+        const wallpapers=current.wallpapers ??= {};
+        if (submitter?.value==='reset') { delete wallpapers[state.id]; return; }
+        const currentMedia=media ?? (data.has('remove-media')?undefined:wallpapers[state.id]?.media);
+        const color=data.has('use-color')?get('color'):'';
+        if (!color && !currentMedia) { delete wallpapers[state.id]; return; }
+        wallpapers[state.id]={color,fit:get('fit'),position:get('position'),shade:Number(get('shade')),
+          ...(currentMedia?{media:currentMedia}:{})};
+      },'已保存页面背景',()=>{ location.hash=state.id; },files,true);
+    } else if (state.kind==='auto-capture') {
+      const config={enabled:data.has('enabled'),ledger:get('ledger'),wechat:get('wechat'),alipay:get('alipay')};
+      must(!config.enabled || config.wechat || config.alipay,'请为至少一个平台选择账户。');
+      await commit(current=>{ current.autoCapture=config; },'已保存自动记账设置',undefined,undefined,true);
     } else if (state.kind==='csv') {
       let summary;
       await commit(current=>{ summary=importCSV(current,state.raw); });
@@ -884,7 +1166,6 @@ async function inspectFile() {
   if (!file || !book) return;
   try {
     if (fileMode==='csv' && file.size>25_000_000) throw new Error('文件超过 25 MB，请分批导入 CSV。');
-    if (fileMode==='backup' && file.size>maxBackupBytes) throw new Error('备份文件超过 160 MB。');
     const raw=await file.text();
     if (fileMode==='csv') {
       const preview=structuredClone(book);
@@ -900,7 +1181,7 @@ async function inspectFile() {
       const files=restoreAttachmentFiles(data,attachmentFiles);
       modalFrame({kind:'restore',data,files},'确认恢复备份',`<p>${esc(file.name)}</p>
         <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户、${data.budgets.length} 项预算${data.savings.length?`、${data.savings.length} 项存款计划`:''}${files.size?`和 ${files.size} 个附件`:''}。</p>
-        <p>恢复会替换当前账本的全部内容。需要保留当前账目时，请先取消并导出本机备份。</p>`,cancel+submit('替换并恢复'));
+        <p>恢复会替换本机所有账本、附件和背景。本文件含 ${data.ledgers?.length ?? 0} 个独立账本。请先备份现有账目。</p>`,cancel+submit('替换并恢复'));
     }
   } catch (error) {
     modalFrame({kind:'info'},'文件读取失败',`<p class="error">${esc(showError(error))}</p>`,submit('关闭'));
@@ -942,6 +1223,11 @@ function openReportDetail(kind,button,event) {
 
 const actions = {
   new:id=>openEntry(null,id),
+  'edit-ledger':editLedger,
+  'open-ledger':id=>selectLedger(id),
+  wallpaper:openWallpaper,
+  'configure-auto':configureAuto,
+  'payment-settings':()=>android?.paymentSettings(),
   batch:openBatch,
   'new-debt':direction=>openDebt(null,direction),
   'debt-detail':id=>{ const debt=debtOf(book,id); if (debt) openDebtDetail(debt); },
@@ -1065,12 +1351,16 @@ const actions = {
   'pick-backup':()=>chooseFile('backup'),
   'csv-template':()=>download('日常账本-导入模板.csv',csvTemplate(),'text/csv;charset=utf-8'),
   backup:async(_id,button)=>{
+    requestPersistence();
     button.disabled=true;
     try {
       const {book,files}=await readBackup();
       if (files.size) tell('正在打包账目与附件…');
       await download(`日常账本-备份-${today()}.json`,await buildBackup(book,files));
-      if (!android) tell('备份下载已发起');
+      if (!android) {
+        markBackup();
+        tell('备份下载已发起');
+      }
     } finally { button.disabled=false; }
   },
   export:()=>download(`日常账本-全量-${today()}.csv`,exportCSV(book),'text/csv;charset=utf-8'),
@@ -1106,6 +1396,9 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   if (!dialog.open) return;
   const {name,value}=event.target;
+  if (modal.kind==='ledger' && ['style','icon'].includes(name)) updateLedgerLook();
+  if (modal.kind==='auto-capture' && name==='ledger') updateAutoAccounts();
+  if (modal.kind==='wallpaper' && name==='color') $('#modal-form [name="use-color"]').checked=true;
   if (modal.kind==='bulk-datetime' && (name==='date-mode' || name==='time-mode')) {
     const field=dialog.querySelector(`[data-bulk-field="${name.split('-')[0]}"]`);
     field.hidden=field.disabled=value!=='set';
@@ -1177,6 +1470,8 @@ dialog.addEventListener('close',()=>{
     dialogContent.replaceChildren();
   }
   flushRefresh();
+  capturePayments();
+  openDebtFromReminder();
   checkUpdate();
 });
 window.visualViewport?.addEventListener('resize',fitBatchSheet);
@@ -1314,6 +1609,13 @@ window.addEventListener('offline',offlineStatus);
 window.addEventListener('nativeforeground',()=>{
   if (!dialog.open) checkUpdate();
   updateReminderStatus();
+  capturePayments();
+  if (page==='auto' && book && !dialog.open) render();
+});
+window.addEventListener('nativebackupcomplete',markBackup);
+window.addEventListener('nativedebtopen',event=>{
+  debtLaunch=event.detail;
+  openDebtFromReminder();
 });
 window.addEventListener('beforeinstallprompt',event=>{
   if (isInstalled() || typeof event.prompt!=='function') return;
@@ -1332,7 +1634,9 @@ setInterval(()=>{
 },300_000);
 setInterval(()=>{
   if (book && !dialog.open && (page==='savings' || page==='saving-detail') && lastSavingsDate!==today()) render();
+  syncBackupReminder();
 },60_000);
+if (android?.pendingPayments) setInterval(capturePayments,5000);
 $('#release-summary').textContent=`${appVersion} · ${currentRelease.title}`;
 releaseNotice.hidden=seenRelease===appVersion;
 offlineStatus();

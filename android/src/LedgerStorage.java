@@ -74,8 +74,6 @@ final class LedgerStorage {
         File file = staged(token, id);
         if (!file.getParentFile().isDirectory() || encoded.length() > 262144) throw new IOException("暂存内容无效。");
         byte[] bytes = Base64.decode(encoded, Base64.NO_WRAP);
-        long limit = id.equals("download") ? 160_000_000L : 10_000_000L;
-        if (file.length() + bytes.length > limit) throw new IOException("文件超过可保存大小。");
         try (FileOutputStream out = new FileOutputStream(file, true)) {
             out.write(bytes);
         }

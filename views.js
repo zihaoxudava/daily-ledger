@@ -1,6 +1,6 @@
 import { types, accountTypes, frequencies } from './catalog.js';
 import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining,
-  newestFirst, dateAndTime, savingOf, savingTotals, savingCalendar } from './store.js';
+  newestFirst, dateAndTime, savingOf, savingTotals, savingCalendar, wallpaperPages } from './store.js';
 import { occurrence } from './schedule.js';
 import { releases } from './releases.js';
 import { android } from './native.js';
@@ -39,7 +39,10 @@ const fmtDate = date => `${Number(date.slice(5,7))}月${Number(date.slice(8,10))
 const value = amount => `<b class="number">${money(amount)}</b>`;
 
 const titles = {overview:'总览',records:'明细',reports:'统计',plan:'预算',debts:'借出借入',settings:'更多',accounts:'账户',categories:'分类',files:'数据与备份'};
-export const tabs = ['overview','records','reports','plan','debts','settings'];
+const pageNames={...titles,months:'月份总览',updates:'版本更新',savings:'定期存款','saving-detail':'存款详情',
+  'report-detail':'统计明细',ledgers:'独立账本',appearance:'页面外观',auto:'自动记账'};
+export const tabs = ['overview','records','reports','plan','debts','ledgers','settings'];
+export const wallpaperPageNames = Object.fromEntries(wallpaperPages.map(id=>[id,pageNames[id]]));
 const isSelected = (a,b) => a === b ? ' selected' : '';
 const selected = (a,b) => `aria-pressed="${a===b}"`;
 const button = (text, action, type='secondary', id='') =>
@@ -69,11 +72,11 @@ function setting(glyph,title,subtitle,action,target='') {
 }
 
 export function nav(page, mobile) {
-  const current = ['accounts','categories','files','updates','savings','saving-detail'].includes(page) ? 'settings' :
+  const current = ['accounts','categories','files','updates','savings','saving-detail','appearance','auto'].includes(page) ? 'settings' :
     page==='report-detail' ? 'reports' : page;
-  const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''}>${icon(tab)}<span>${titles[tab]}</span></a>`;
+  const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''} aria-label="${pageNames[tab]}">${icon(tab==='ledgers'?'wallet':tab)}<span>${mobile && tab==='ledgers'?'账本':mobile && tab==='debts'?'借还':pageNames[tab]}</span></a>`;
   if (!mobile) return tabs.map(link).join('');
-  return [link('overview'),link('records'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('reports'),link('debts'),link('settings')].join('');
+  return [link('overview'),link('records'),link('reports'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('debts'),link('ledgers'),link('settings')].join('');
 }
 
 function periodArrows(unit, previous, middle, next, action='period') {
@@ -416,6 +419,8 @@ function settings() {
     ${setting('plan','预算与周期','分类预算、订阅、分期和固定收支','','#plan')}
     ${setting('wallet','定期存款','设置每日存款，查看应存、待存和实存','','#savings')}
     ${setting('file','数据与备份','完整备份、CSV 和恢复','','#files')}
+    ${setting('overview','页面外观','单独设置各页的颜色、图片、动图或视频','','#appearance')}
+    ${android?setting('check','自动记账','识别微信、支付宝付款通知','','#auto'):''}
     </div></section>
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">
     ${android?setting('save','应用信息','版本、更新和离线状态','offline-info'):setting('save','安装到桌面','手机、平板和电脑 · 支持离线','offline-info')}
@@ -455,14 +460,60 @@ function categories(book,ui) {
   return header('分类','分类组用于预算，二级分类用于记账',button('新增分类组','group','primary'))+
     `<div class="inline-actions"><div class="segments"><button data-action="category-kind" data-id="expense" ${selected(kind,'expense')}>支出与退款</button><button data-action="category-kind" data-id="income" ${selected(kind,'income')}>收入</button></div></div><section class="panel">${groups}</section>`;
 }
-function files(book) {
+function files(book,ui) {
   return header('数据与备份','换机前请先保存一份完整备份')+`
     <section class="panel">${panelHead('完整备份 · JSON')}
-    <p class="muted">包含 ${book.entries.length} 笔账目、${book.debts.length} 项借出借入，以及账户、分类、预算和周期规则。</p>
+    <p class="muted">完整备份包含主账本、${ui.root.ledgers?.length ?? 0} 个独立账本、附件和页面背景。</p>
     <div class="actions section-gap">${button('导出完整备份','backup','primary')}${button('恢复备份','pick-backup','neutral')}</div></section>
-    <section class="panel section-gap">${panelHead('流水表格 · CSV')}
+    <section class="panel section-gap">${panelHead('当前账本流水 · CSV')}
     <div class="actions">${button('导出全部流水','export','secondary')}${button('下载导入模板','csv-template','neutral')}${button('导入 CSV','pick-csv','neutral')}</div></section>
     <section class="panel section-gap"><h2>存储位置</h2><p class="muted section-gap">账目保存在当前设备的网页 App 中。换机、清理网站数据或删除主屏幕 App 前，请先导出完整备份到「文件」。</p></section>`;
+}
+
+function ledgers(book,ui) {
+  const items=[{id:'main',name:'主账本',description:'原有日常账目',style:'jade',icon:'wallet',data:ui.root},
+    ...(ui.root.ledgers ?? [])];
+  return header('独立账本','各自管理账户、分类和流水',button('新建账本','edit-ledger','primary'))+
+    `<div class="ledger-grid">${items.map(item=>{
+      const month=totals(monthly(item.data,ui.month));
+      const selected=ui.ledgerId===item.id;
+      return `<article class="panel ledger-card ledger-${item.style}">
+        <div class="ledger-card-head"><span class="ledger-icon">${icon(item.icon)}</span>
+        <div><h2>${esc(item.name)}</h2><p>${esc(item.description || '独立账本')}</p></div></div>
+        <div class="ledger-card-balance"><span>${fmtMonth(ui.month)}结余</span>${value(month.net)}</div>
+        <div class="actions">
+        <button class="button ${selected?'neutral':'primary'}" type="button" data-action="open-ledger" data-id="${item.id}">${selected?'打开当前账本':'打开账本'}</button>
+        ${item.id==='main'?'':`<button class="button secondary" type="button" data-action="edit-ledger" data-id="${item.id}">编辑</button>`}
+        </div></article>`;
+    }).join('')}</div>`;
+}
+
+function appearance(book,ui) {
+  const walls=ui.root.wallpapers ?? {};
+  return header('页面外观','每个页面可独立设置背景')+`<section class="panel"><div class="setting-grid">
+    ${Object.entries(wallpaperPageNames).map(([id,name])=>{
+      const wall=walls[id];
+      return `<button class="setting" data-action="wallpaper" data-id="${id}" type="button">
+        <span class="ledger-icon wallpaper-swatch" style="--swatch:${wall?.color || '#e8efe9'}">${icon(wall?.media?'file':'overview')}</span>
+        <span><b>${esc(name)}</b><small>${wall?.media?esc(wall.media.name):wall?.color?'自定义颜色':'默认背景'}</small></span>
+      </button>`;
+    }).join('')}
+    </div></section>`;
+}
+
+function auto(book,ui) {
+  if (!android?.paymentSettings) return header('自动记账')+'<section class="panel"><p>请使用最新版 Android 安装包。</p></section>';
+  const enabled=ui.root.autoCapture?.enabled;
+  const allowed=android.paymentPermission();
+  const status=enabled && allowed?'已开启':enabled?'等待授权':'未开启';
+  return header('自动记账','Android · 微信和支付宝')+`<section class="panel">
+    <div class="panel-head"><h2>付款通知</h2><span class="chip">${status}</span></div>
+    <ol class="steps"><li>点「配置自动记账」，选择目标账本及两个平台对应的账户。</li>
+    <li>点「系统通知访问」，允许「日常账本自动记账」访问通知。</li>
+    <li>付款后，账本会保存识别到的通知，打开账本后自动入账。请保留微信和支付宝的付款通知。</li></ol>
+    <p class="muted">通知没显示金额、付款类型不明确，或付款时没有系统通知，都可能漏记。只处理这两个 App 的明确付款通知，记录留在本机。</p>
+    <div class="actions section-gap">${button('配置自动记账','configure-auto','primary')}${button('系统通知访问','payment-settings','neutral')}</div>
+    </section>`;
 }
 
 function debts(book) {
@@ -491,4 +542,4 @@ function debts(book) {
     `<div class="top-grid debt-grid">${sections}</div>`;
 }
 
-export const pages = {overview,records,reports,'report-detail':reportDetail,plan,settings,accounts,categories,files,debts,updates,months:monthOverview,savings,'saving-detail':savingDetail};
+export const pages = {overview,records,reports,'report-detail':reportDetail,plan,settings,accounts,categories,files,debts,updates,months:monthOverview,savings,'saving-detail':savingDetail,ledgers,appearance,auto};

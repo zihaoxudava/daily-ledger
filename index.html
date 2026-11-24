@@ -14,6 +14,7 @@
   <title>日常账本</title>
 </head>
 <body>
+  <div id="page-wallpaper" class="page-wallpaper" aria-hidden="true"></div>
   <aside class="sidebar" aria-label="主导航">
     <a class="brand" href="#overview"><img src="./apple-touch-icon.png" alt="" width="40" height="40"><span>日常账本<small>个人账本</small></span></a>
     <nav class="side-nav" id="side-nav"></nav>
@@ -33,6 +34,13 @@
     <span><strong id="release-summary"></strong><a href="#updates">查看更新</a></span>
     <button class="icon-button" type="button" data-action="dismiss-release" aria-label="关闭更新提示">×</button>
   </aside>
+  <div class="ledger-meta">
+    <a id="active-ledger" class="active-ledger" href="#ledgers" hidden></a>
+    <aside id="backup-reminder" class="backup-reminder" aria-label="每月备份提醒" hidden>
+      <div><strong>该备份账本了</strong><p>导出所有账本、凭证和背景，保存到设备文件或云盘。</p></div>
+      <button class="button primary" type="button" data-action="backup">立即备份</button>
+    </aside>
+  </div>
   <main id="content" class="workspace" aria-busy="true">
     <section class="panel system-message"><h1>正在打开账本…</h1><p>请稍候。</p></section>
   </main>

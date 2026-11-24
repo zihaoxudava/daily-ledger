@@ -22,18 +22,20 @@ import java.util.Set;
 
 public final class DebtAlarmReceiver extends BroadcastReceiver {
     static final String EXTRA_DEBTS="open-debts";
+    static final String EXTRA_LEDGER="debt-ledger";
     private static final String FIRE="com.zihaoxudava.dailyledger.DEBT_REMINDER";
     private static final String CHANNEL="debt-reminders";
     private static final int NOTICE=1;
     private static final long DAY=86_400_000L;
 
     private static final class Reminder {
-        final String id, dateTime;
+        final String id, dateTime, ledger;
         final boolean lent;
         final long at;
 
-        Reminder(JSONObject debt,JSONObject config) throws Exception {
-            id=debt.getString("id");
+        Reminder(String ledger,JSONObject debt,JSONObject config) throws Exception {
+            this.ledger=ledger;
+            id=("main".equals(ledger)?"":ledger+"~")+debt.getString("id");
             dateTime=config.getString("date")+"T"+config.getString("time");
             lent="lent".equals(debt.getString("direction"));
             at=LocalDateTime.parse(dateTime).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
@@ -44,6 +46,16 @@ public final class DebtAlarmReceiver extends BroadcastReceiver {
         Map<String,Reminder> reminders=new HashMap<>();
         JSONObject book=LedgerStorage.get(context).readBook();
         if (book==null) return reminders;
+        collect("main",book,reminders);
+        JSONArray ledgers=book.optJSONArray("ledgers");
+        for (int i=0;ledgers!=null && i<ledgers.length();i++) {
+            JSONObject ledger=ledgers.getJSONObject(i);
+            collect(ledger.getString("id"),ledger.getJSONObject("data"),reminders);
+        }
+        return reminders;
+    }
+
+    private static void collect(String ledger,JSONObject book,Map<String,Reminder> reminders) throws Exception {
         JSONArray debts=book.getJSONArray("debts");
         for (int i=0;i<debts.length();i++) {
             JSONObject debt=debts.getJSONObject(i);
@@ -53,11 +65,10 @@ public final class DebtAlarmReceiver extends BroadcastReceiver {
             JSONArray payments=debt.getJSONArray("payments");
             for (int j=0;j<payments.length();j++) remaining-=payments.getJSONObject(j).getLong("amount");
             if (remaining>0) {
-                Reminder reminder=new Reminder(debt,config);
+                Reminder reminder=new Reminder(ledger,debt,config);
                 reminders.put(reminder.id,reminder);
             }
         }
-        return reminders;
     }
 
     private static PendingIntent alarm(Context context,String id) {
@@ -138,7 +149,8 @@ public final class DebtAlarmReceiver extends BroadcastReceiver {
             if (item.dateTime.equals(prefs.getString("sent:"+id,""))) return;
             NotificationManager manager=context.getSystemService(NotificationManager.class);
             manager.createNotificationChannel(new NotificationChannel(CHANNEL,"借款与还款提醒",NotificationManager.IMPORTANCE_DEFAULT));
-            Intent open=new Intent(context,MainActivity.class).putExtra(EXTRA_DEBTS,true);
+            Intent open=new Intent(context,MainActivity.class).putExtra(EXTRA_DEBTS,true)
+                .putExtra(EXTRA_LEDGER,item.ledger).setData(Uri.fromParts("daily-ledger-debt",item.id,null));
             PendingIntent target=PendingIntent.getActivity(context,1,open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
             String title=item.lent?"收款提醒":"还款提醒";
             Notification notice=new Notification.Builder(context,CHANNEL)
