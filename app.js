@@ -101,6 +101,49 @@ const motion = matchMedia('(prefers-reduced-motion: no-preference)');
 let pageAnimation, toastAnimation;
 let wallKey,wallMediaKey,wallURL,wallTask=0;
 const wallLayer=$('#page-wallpaper');
+const defaultStatusTint='#f4f6f3';
+const wallpaperFormats=[...wallpaperImages,...wallpaperVideos];
+const wallpaperObjectPosition=wall=>`${wall.positionX ?? 'center'} ${wall.position}`;
+
+function tintStatusBar(wall,media) {
+  if (!navigator.standalone) return;
+  let tint=wall?.color || defaultStatusTint;
+  if (wall) {
+    const canvas=document.createElement('canvas');
+    canvas.width=16;
+    canvas.height=1;
+    const context=canvas.getContext('2d',{willReadFrequently:true});
+    if (context) {
+      context.fillStyle=tint;
+      context.fillRect(0,0,16,1);
+      const width=media?.naturalWidth || media?.videoWidth;
+      const height=media?.naturalHeight || media?.videoHeight;
+      const viewWidth=wallLayer.clientWidth, viewHeight=wallLayer.clientHeight;
+      if (width && height && viewWidth && viewHeight) {
+        const scale=wall.fit==='cover'?Math.max(viewWidth/width,viewHeight/height):Math.min(viewWidth/width,viewHeight/height);
+        const visibleWidth=Math.min(width,viewWidth/scale), visibleHeight=Math.min(height,viewHeight/scale);
+        const position={top:0,center:.5,bottom:1}[wall.position];
+        const positionX={left:0,center:.5,right:1}[wall.positionX ?? 'center'];
+        const band=Math.max(1,Math.min(visibleHeight,32/scale));
+        if (position*(viewHeight-height*scale)<32) {
+          try {
+            context.drawImage(media,(width-visibleWidth)*positionX,(height-visibleHeight)*position,visibleWidth,band,0,0,16,1);
+          } catch {}
+        }
+      }
+      context.fillStyle=`rgb(246 249 246 / ${wall.shade/100})`;
+      context.fillRect(0,0,16,1);
+      const sample=context.getImageData(0,0,16,1).data;
+      const channels=[0,0,0];
+      for (let i=0;i<sample.length;i+=4) for(let n=0;n<3;n++) channels[n]+=sample[i+n];
+      tint='#'+channels.map(value=>Math.round(value/16).toString(16).padStart(2,'0')).join('');
+    }
+  }
+  $('[name=theme-color]').content=tint;
+  const surface=wall?tint:'';
+  document.documentElement.style.backgroundColor=surface;
+  document.body.style.backgroundColor=surface;
+}
 
 function syncWallpaper() {
   const wall=wallpaperFor(ui.root,page);
@@ -112,16 +155,20 @@ function syncWallpaper() {
   document.body.style.setProperty('--wall-surface',String(1-(wall?.transparency ?? defaultWallpaperTransparency)/100));
   wallLayer.style.backgroundColor=wall?.color || '';
   wallLayer.style.setProperty('--wall-shade',String((wall?.shade ?? 0)/100));
-  const mediaKey=JSON.stringify([wall?.media,wall?.fit,wall?.position,motion.matches]);
-  if (mediaKey===wallMediaKey) return;
+  const mediaKey=JSON.stringify([wall?.media,wall?.fit,wall?.position,wall?.positionX,motion.matches]);
+  if (mediaKey===wallMediaKey) {
+    tintStatusBar(wall,wallLayer.firstElementChild);
+    return;
+  }
   wallMediaKey=mediaKey;
   const task=++wallTask;
   wallLayer.replaceChildren();
   if (wallURL) URL.revokeObjectURL(wallURL);
   wallURL=undefined;
+  tintStatusBar(wall);
   if (!wall?.media) return;
   const video=wallpaperVideos.includes(wall.media.type);
-  if (!motion.matches && (video || /image\/(gif|webp|avif|png)/.test(wall.media.type))) return;
+  if (!motion.matches && (video || wall.media.type==='image/gif')) return;
   readAttachment(wall.media).then(file=>{
     if (task!==wallTask) return;
     const media=document.createElement(video?'video':'img');
@@ -130,7 +177,10 @@ function syncWallpaper() {
       media.setAttribute('muted','');
     } else media.alt='';
     media.style.objectFit=wall.fit;
-    media.style.objectPosition=wall.position;
+    media.style.objectPosition=wallpaperObjectPosition(wall);
+    media.addEventListener(video?'loadeddata':'load',()=>{
+      if (task===wallTask) tintStatusBar(wallpaperFor(ui.root,page),media);
+    },{once:true});
     media.addEventListener('error',()=>{ if (task===wallTask) media.remove(); },{once:true});
     wallURL=URL.createObjectURL(file);
     media.src=wallURL;
@@ -314,32 +364,106 @@ function openDebtFromReminder() {
   selectLedger(id,'debts');
 }
 
+const wallpaperLayout=wall=>({
+  fit:wall?.fit ?? 'contain',position:wall?.position ?? 'center',positionX:wall?.positionX ?? 'center',
+  shade:wall?.shade ?? 0,transparency:wall?.transparency ?? defaultWallpaperTransparency,
+});
+const wallpaperMediaType=file=>{
+  const types={mov:'video/quicktime',mp4:'video/mp4',webm:'video/webm',gif:'image/gif',png:'image/png',
+    jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',avif:'image/avif',heic:'image/heic',heif:'image/heif',bmp:'image/bmp'};
+  return wallpaperFormats.includes(file.type)?file.type:types[file.name.split('.').pop().toLowerCase()];
+};
+let previewURL,previewSource,previewRequest=0;
+
+function clearWallpaperPreview() {
+  previewRequest++;
+  if (previewURL) URL.revokeObjectURL(previewURL);
+  previewURL=previewSource=undefined;
+}
+
+function refreshWallpaperPreview() {
+  const form=$('#modal-form');
+  const preview=$('#wall-preview');
+  if (!preview) return;
+  const field=name=>form.elements.namedItem(name);
+  const data=ui.root.wallpapers?.[modal.id];
+  const selected=field('media').files[0];
+  const useColor=field('use-color').checked;
+  const original=data?.media ?? (!data?.system && !useColor?wallpaperFor(ui.root,modal.id)?.media:undefined);
+  const source=selected ?? (field('remove-media')?.checked?undefined:original);
+  const layout={fit:field('fit').value,position:field('position').value,positionX:field('position-x').value};
+  const updateFraming=media=>{
+    media.style.objectFit=layout.fit;
+    media.style.objectPosition=wallpaperObjectPosition(layout);
+  };
+  const layer=preview.querySelector('.wall-preview-media');
+  const defaultColor=!selected && !useColor && !data?.system?wallpaperFor(ui.root,modal.id)?.color:'';
+  preview.style.backgroundColor=useColor?field('color').value:defaultColor || '';
+  preview.style.setProperty('--preview-shade',String(Number(field('shade').value)/100));
+  preview.style.setProperty('--preview-surface',String(1-Number(field('transparency').value)/100));
+  if (layer.firstElementChild) updateFraming(layer.firstElementChild);
+  if (source===previewSource) return;
+  clearWallpaperPreview();
+  previewSource=source;
+  layer.replaceChildren();
+  if (!source) return;
+  const request=previewRequest;
+  const type=selected?wallpaperMediaType(selected):source.type;
+  if (!wallpaperFormats.includes(type)) return;
+  (selected?Promise.resolve(selected):readAttachment(source)).then(file=>{
+    if (request!==previewRequest || !preview.isConnected) return;
+    const video=wallpaperVideos.includes(type);
+    const media=document.createElement(video?'video':'img');
+    if (video) {
+      media.autoplay=media.loop=media.muted=media.playsInline=true;
+      media.setAttribute('muted','');
+    } else media.alt='';
+    previewURL=URL.createObjectURL(file);
+    media.src=previewURL;
+    layer.replaceChildren(media);
+    refreshWallpaperPreview();
+  }).catch(()=>{});
+}
+
+function setOriginalWallpaper() {
+  const fields=$('#modal-form').elements;
+  for (const [name,value] of Object.entries({fit:'contain',position:'center','position-x':'center',shade:'0'})) {
+    fields.namedItem(name).value=value;
+  }
+  refreshWallpaperPreview();
+}
+
 function openWallpaper(id) {
   if (!Object.hasOwn(wallpaperPageNames,id)) return;
   const wall=ui.root.wallpapers?.[id];
-  const transparency=wall?.transparency ?? wallpaperFor(ui.root,id)?.transparency ?? defaultWallpaperTransparency;
-  const types=[...wallpaperImages,...wallpaperVideos].join(',');
+  const layout=wallpaperLayout(wallpaperFor(ui.root,id));
+  clearWallpaperPreview();
   modalFrame({kind:'wallpaper',id},`${wallpaperPageNames[id]}背景`,
     `<p class="muted">${id==='overview'?'总览背景也会用于未单独设置的页面。':'此页可以独立设置，也可以跟随总览。'}</p>
     <div class="field-grid">
       ${label('底色',`<input type="color" name="color" value="${wall?.color || '#e8efe9'}">`)}
       <label class="option-check"><input type="checkbox" name="use-color"${wall?.color?' checked':''}>使用自定义底色</label>
     </div>
-    ${label('图片、动图或视频',`<input type="file" name="media" accept="${types},.mov,.mp4,.webm">`)}
+    ${label('图片、动图或视频',`<input type="file" name="media" accept="${wallpaperFormats.join(',')},.mov,.mp4,.webm">`)}
     ${wall?.media?`<label class="option-check"><input type="checkbox" name="remove-media">移除 ${esc(wall.media.name)}</label>`:''}
-    <div class="field-grid">
-      ${label('显示方式',`<select name="fit">${optionMap({cover:'铺满屏幕',contain:'完整显示'},wall?.fit)}</select>`)}
-      ${label('对齐',`<select name="position">${optionMap({center:'居中',top:'靠上',bottom:'靠下'},wall?.position)}</select>`)}
+    <div class="wall-preview-row">
+      <div id="wall-preview" class="wall-preview" aria-hidden="true"><div class="wall-preview-media"></div><i></i></div>
+      <div><p>壁纸预览</p><button class="button secondary" type="button" data-action="original-wallpaper">按原图显示</button></div>
     </div>
-    ${label('壁纸亮度 · 浅色遮罩',`<input type="range" name="shade" min="0" max="85" value="${wall?.shade ?? 32}">`)}
-    ${label(`卡片与导航栏透明度 <output id="wall-transparency">${transparency}%</output>`,
-      `<input type="range" name="transparency" min="0" max="100" value="${transparency}">`)}
-    <p class="muted">透明度越高，越能看清壁纸。文字和图标保持清晰度。</p>
+    ${label('显示方式',`<select name="fit">${optionMap({contain:'完整显示原图',cover:'铺满屏幕（可能裁切）'},layout.fit)}</select>`)}
+    <div class="field-grid">
+      ${label('上下对齐',`<select name="position">${optionMap({center:'居中',top:'靠上',bottom:'靠下'},layout.position)}</select>`)}
+      ${label('左右对齐',`<select name="position-x">${optionMap({center:'居中',left:'靠左',right:'靠右'},layout.positionX)}</select>`)}
+    </div>
+    ${label('浅色遮罩（0% 保留原色）',`<input type="range" name="shade" min="0" max="85" value="${layout.shade}">`)}
+    ${label(`卡片与导航栏透明度 <output id="wall-transparency">${layout.transparency}%</output>`,
+      `<input type="range" name="transparency" min="0" max="100" value="${layout.transparency}">`)}
     <p class="muted">视频会静音循环播放。优先使用设备支持的 MP4 视频。</p>
     <div class="actions">
     ${id!=='overview' || wall?'<button type="submit" value="reset" class="button neutral">'+(id==='overview'?'恢复系统底色':'跟随总览')+'</button>':''}
     ${id==='overview'?'':'<button type="submit" value="system" class="button neutral">使用系统底色</button>'}
     </div>`,cancel+submit('保存'));
+  refreshWallpaperPreview();
 }
 
 function configureAuto() {
@@ -1101,11 +1225,8 @@ async function submitModal(event) {
       let media;
       const files=new Map();
       if (action!=='reset' && action!=='system' && file?.name) {
-        const formats=[...wallpaperImages,...wallpaperVideos];
-        const guessed={mov:'video/quicktime',mp4:'video/mp4',webm:'video/webm',gif:'image/gif',png:'image/png',
-          jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
-        const type=formats.includes(file.type)?file.type:guessed[file.name.split('.').pop().toLowerCase()];
-        must(formats.includes(type),'请选择支持的图片、动图或视频文件。');
+        const type=wallpaperMediaType(file);
+        must(wallpaperFormats.includes(type),'请选择支持的图片、动图或视频文件。');
         media={...attachmentFromFile(file,`wall_${uid()}`),type};
         files.set(media.id,file);
       }
@@ -1113,19 +1234,20 @@ async function submitModal(event) {
         const wallpapers=current.wallpapers ??= {};
         if (action==='reset') { delete wallpapers[state.id]; return; }
         if (action==='system' && state.id!=='overview') {
-          wallpapers[state.id]={system:true,color:'',fit:'cover',position:'center',shade:32};
+          wallpapers[state.id]={system:true,color:'',fit:'contain',position:'center',shade:0};
           return;
         }
         const currentMedia=media ?? (data.has('remove-media')?undefined:wallpapers[state.id]?.media);
         const color=data.has('use-color')?get('color'):'';
-        const transparency=Number(get('transparency'));
+        const layout={fit:get('fit'),position:get('position'),positionX:get('position-x'),
+          shade:Number(get('shade')),transparency:Number(get('transparency'))};
+        const inherited=wallpaperLayout(wallpapers.overview);
         if (!color && !currentMedia && (state.id==='overview' ||
-            transparency===(wallpapers.overview?.transparency ?? defaultWallpaperTransparency))) {
+            Object.keys(layout).every(key=>layout[key]===inherited[key]))) {
           delete wallpapers[state.id];
           return;
         }
-        wallpapers[state.id]={color,fit:get('fit'),position:get('position'),shade:Number(get('shade')),
-          transparency,
+        wallpapers[state.id]={color,...layout,
           ...(currentMedia?{media:currentMedia}:{})};
       },'已保存页面背景',()=>{ location.hash=state.id; },files,true);
     } else if (state.kind==='auto-capture') {
@@ -1250,6 +1372,7 @@ const actions = {
   'edit-ledger':editLedger,
   'open-ledger':id=>selectLedger(id),
   wallpaper:openWallpaper,
+  'original-wallpaper':setOriginalWallpaper,
   'configure-auto':configureAuto,
   'payment-settings':()=>android?.paymentSettings(),
   batch:openBatch,
@@ -1404,8 +1527,9 @@ document.addEventListener('click',async event=>{
 });
 document.addEventListener('submit',submitModal);
 document.addEventListener('input',event=>{
-  if (dialog.open && modal?.kind==='wallpaper' && event.target.name==='transparency') {
-    $('#wall-transparency').value=`${event.target.value}%`;
+  if (dialog.open && modal?.kind==='wallpaper' && ['transparency','shade'].includes(event.target.name)) {
+    if (event.target.name==='transparency') $('#wall-transparency').value=`${event.target.value}%`;
+    refreshWallpaperPreview();
     return;
   }
   const {filter:key,selectEntry}=event.target.dataset;
@@ -1426,7 +1550,11 @@ document.addEventListener('change',event=>{
   const {name,value}=event.target;
   if (modal.kind==='ledger' && ['style','icon'].includes(name)) updateLedgerLook();
   if (modal.kind==='auto-capture' && name==='ledger') updateAutoAccounts();
-  if (modal.kind==='wallpaper' && name==='color') $('#modal-form [name="use-color"]').checked=true;
+  if (modal.kind==='wallpaper') {
+    if (name==='color') $('#modal-form [name="use-color"]').checked=true;
+    if (name==='media' && event.target.files.length) setOriginalWallpaper();
+    else refreshWallpaperPreview();
+  }
   if (modal.kind==='bulk-datetime' && (name==='date-mode' || name==='time-mode')) {
     const field=dialog.querySelector(`[data-bulk-field="${name.split('-')[0]}"]`);
     field.hidden=field.disabled=value!=='set';
@@ -1494,6 +1622,7 @@ dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
 dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal.kind!=='batch') dialog.close(); });
 dialog.addEventListener('close',()=>{
   if (!dialog.open) {
+    if (modal?.kind==='wallpaper') clearWallpaperPreview();
     modal=undefined;
     dialogContent.replaceChildren();
   }

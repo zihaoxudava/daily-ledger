@@ -32,6 +32,8 @@ export function wallpaperFor(root,page) {
   if (wall?.system) return undefined;
   if (wall?.media || wall?.color || page==='overview') return wall;
   const overview=walls?.overview;
+  if (overview && wall?.positionX!==undefined) return {...overview,
+    fit:wall.fit,position:wall.position,positionX:wall.positionX,shade:wall.shade,transparency:wall.transparency};
   if (overview && wall?.transparency!==undefined) return {...overview,transparency:wall.transparency};
   return overview;
 }
@@ -162,6 +164,7 @@ export function validate(book) {
         !(wall.color==='' || /^#[a-fA-F0-9]{6}$/.test(wall.color)) ||
         !Number.isInteger(wall.shade) || wall.shade<0 || wall.shade>85 || !['cover','contain'].includes(wall.fit) ||
         !['center','top','bottom'].includes(wall.position) ||
+        (wall.positionX!==undefined && !['left','center','right'].includes(wall.positionX)) ||
         (wall.transparency!==undefined && (!Number.isInteger(wall.transparency) || wall.transparency<0 || wall.transparency>100)) ||
         (wall.media!==undefined && ![...wallpaperVideos,...wallpaperImages].includes(wall.media?.type)))) {
     throw new Error('页面背景设置无效。');
