@@ -1,7 +1,7 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
 import { today, shiftMonth, uid, money, parseMoney, readBook as readRoot, readBackup, writeBook as writeRoot, applyRecurring, hasDueRecurring, validate,
   validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf,
-  initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, readAttachment, MAX_AMOUNT } from './store.js';
+  initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, wallpaperFor, readAttachment, MAX_AMOUNT } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
@@ -102,8 +102,8 @@ let wallKey,wallURL,wallTask=0;
 const wallLayer=$('#page-wallpaper');
 
 function syncWallpaper() {
-  const wall=ui.root?.wallpapers?.[page];
-  const key=JSON.stringify([page,wall,motion.matches]);
+  const wall=wallpaperFor(ui.root,page);
+  const key=JSON.stringify([wall,motion.matches]);
   if (key===wallKey) return;
   wallKey=key;
   const task=++wallTask;
@@ -314,7 +314,8 @@ function openWallpaper(id) {
   const wall=ui.root.wallpapers?.[id];
   const types=[...wallpaperImages,...wallpaperVideos].join(',');
   modalFrame({kind:'wallpaper',id},`${wallpaperPageNames[id]}背景`,
-    `<div class="field-grid">
+    `<p class="muted">${id==='overview'?'总览背景也会用于未单独设置的页面。':'此页可以独立设置，也可以跟随总览。'}</p>
+    <div class="field-grid">
       ${label('底色',`<input type="color" name="color" value="${wall?.color || '#e8efe9'}">`)}
       <label class="option-check"><input type="checkbox" name="use-color"${wall?.color?' checked':''}>使用自定义底色</label>
     </div>
@@ -325,8 +326,11 @@ function openWallpaper(id) {
       ${label('对齐',`<select name="position">${optionMap({center:'居中',top:'靠上',bottom:'靠下'},wall?.position)}</select>`)}
     </div>
     ${label('内容可读性 · 浅色遮罩',`<input type="range" name="shade" min="0" max="85" value="${wall?.shade ?? 32}">`)}
-    <p class="muted">视频会静音循环播放。优先使用设备支持的 MP4 视频。</p>`,
-    `${wall?'<button type="submit" value="reset" class="button neutral">恢复默认</button>':''}${cancel}${submit('保存')}`);
+    <p class="muted">视频会静音循环播放。优先使用设备支持的 MP4 视频。</p>
+    <div class="actions">
+    ${id!=='overview' || wall?'<button type="submit" value="reset" class="button neutral">'+(id==='overview'?'恢复系统底色':'跟随总览')+'</button>':''}
+    ${id==='overview'?'':'<button type="submit" value="system" class="button neutral">使用系统底色</button>'}
+    </div>`,cancel+submit('保存'));
 }
 
 function configureAuto() {
@@ -1084,9 +1088,10 @@ async function submitModal(event) {
       },'已保存账本',undefined,undefined,true);
     } else if (state.kind==='wallpaper') {
       const file=data.get('media');
+      const action=submitter?.value;
       let media;
       const files=new Map();
-      if (submitter?.value!=='reset' && file?.name) {
+      if (action!=='reset' && action!=='system' && file?.name) {
         const formats=[...wallpaperImages,...wallpaperVideos];
         const guessed={mov:'video/quicktime',mp4:'video/mp4',webm:'video/webm',gif:'image/gif',png:'image/png',
           jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
@@ -1097,7 +1102,11 @@ async function submitModal(event) {
       }
       await commit(current=>{
         const wallpapers=current.wallpapers ??= {};
-        if (submitter?.value==='reset') { delete wallpapers[state.id]; return; }
+        if (action==='reset') { delete wallpapers[state.id]; return; }
+        if (action==='system' && state.id!=='overview') {
+          wallpapers[state.id]={system:true,color:'',fit:'cover',position:'center',shade:32};
+          return;
+        }
         const currentMedia=media ?? (data.has('remove-media')?undefined:wallpapers[state.id]?.media);
         const color=data.has('use-color')?get('color'):'';
         if (!color && !currentMedia) { delete wallpapers[state.id]; return; }

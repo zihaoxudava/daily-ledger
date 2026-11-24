@@ -495,7 +495,8 @@ function appearance(book,ui) {
       const wall=walls[id];
       return `<button class="setting" data-action="wallpaper" data-id="${id}" type="button">
         <span class="ledger-icon wallpaper-swatch" style="--swatch:${wall?.color || '#e8efe9'}">${icon(wall?.media?'file':'overview')}</span>
-        <span><b>${esc(name)}</b><small>${wall?.media?esc(wall.media.name):wall?.color?'自定义颜色':'默认背景'}</small></span>
+        <span><b>${esc(name)}</b><small>${wall?.media?esc(wall.media.name):wall?.color?'自定义颜色':
+          wall?.system || id==='overview'?'系统底色':'跟随总览'}</small></span>
       </button>`;
     }).join('')}
     </div></section>`;

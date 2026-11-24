@@ -75,11 +75,17 @@ h3 { font-size:1rem; }
 .option-check input { width:19px; min-height:19px; flex:none; accent-color:#245a41; }
 .page-wallpaper { position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
 body.has-wallpaper { isolation:isolate; }
+.has-wallpaper :is(.sidebar,.mobile-bar,.tabbar) { background:rgb(248 250 247 / .72); }
 .page-wallpaper img,.page-wallpaper video { width:100%; height:100%; display:block; }
 .page-wallpaper::after { content:''; position:absolute; inset:0; background:rgb(246 249 246 / var(--wall-shade,0)); }
 .has-wallpaper .page-head { padding:12px; border-radius:18px; background:#fbfdfbef; }
 .has-wallpaper .panel { background:#fffffff2; }
 .has-wallpaper .ledger-card { background:linear-gradient(145deg,var(--ledger-light),#fffffff2 95%); }
+@supports (-webkit-touch-callout:none) {
+  @media (display-mode:standalone) {
+    body::before { content:''; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top); z-index:4; background:rgb(18 37 29 / .65); pointer-events:none; }
+  }
+}
 .steps { padding-inline-start:1.4rem; }
 .steps li + li { margin-top:6px; }
 .page-head p { font-size:.91rem; color:var(--muted); margin-top:8px; }
@@ -185,10 +191,10 @@ select { appearance:none; padding-right:28px; background-image:linear-gradient(4
 .progress.over span { background:#bd665e; }
 .section-gap { margin-top:18px; }
 .setting-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-.setting { display:grid; grid-template-columns:42px minmax(0,1fr); gap:11px; align-items:center; width:100%; min-height:71px; text-align:left; padding:11px 12px; border:1px solid var(--line); background:var(--paper); border-radius:14px; }
+.setting { --setting-icon-width:39px; display:grid; grid-template-columns:var(--setting-icon-width) minmax(0,1fr); gap:11px; align-items:center; width:100%; min-height:71px; text-align:left; padding:11px 12px; border:1px solid var(--line); background:var(--paper); border-radius:14px; }
 .setting:hover { background:var(--bg); }
-.setting .quick-icon { width:39px; height:39px; }
-.setting b,.setting small { display:block; }
+.setting > :is(.quick-icon,.wallpaper-swatch) { width:var(--setting-icon-width); height:39px; }
+.setting b,.setting small { display:block; overflow-wrap:anywhere; }
 .setting small { color:var(--muted); font-size:.82rem; line-height:1.4; margin-top:3px; }
 .manage-row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .manage-row p { color:var(--muted); margin-top:4px; font-size:.84rem; line-height:1.4; }
@@ -351,7 +357,7 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
   .update-notice { margin:10px 15px 0; width:auto; }
   .tabbar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); align-items:center; position:fixed; z-index:3; bottom:0; inset-inline:0; border-top:1px solid var(--line); background:#fff; min-height:63px; padding:5px 3px calc(5px + env(safe-area-inset-bottom)); }
   .record-selection { top:calc(56px + env(safe-area-inset-top)); }
-  .tabbar a,.tabbar button { display:flex; flex-direction:column; justify-content:center; align-items:center; gap:3px; min-height:46px; color:var(--muted); font-size:clamp(.66rem,3.1vw,.78rem); font-weight:680; border:0; background:none; padding-inline:0; }
+  .tabbar a,.tabbar button { display:grid; grid-template-rows:33px auto; align-content:center; place-items:center; gap:3px; min-height:46px; color:var(--muted); font-size:clamp(.66rem,3.1vw,.78rem); line-height:1.2; font-weight:680; border:0; background:none; padding:0; }
   .tabbar a[aria-current] { color:#1b6740; }
   .tabbar a span { white-space:nowrap; }
   .tabbar a[aria-current] .icon { width:27px; height:23px; padding:2px; background:var(--soft); border-radius:8px; }
@@ -374,8 +380,8 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
   .metric span { font-size:.79rem; }
   .filter { grid-template-columns:1fr 1fr; }
   .setting-grid { gap:7px; }
-  .setting { grid-template-columns:31px minmax(0,1fr); padding:8px; gap:6px; }
-  .setting .quick-icon { width:30px; height:33px; }
+  .setting { --setting-icon-width:32px; padding:8px; gap:8px; }
+  .setting > :is(.quick-icon,.wallpaper-swatch) { height:32px; border-radius:10px; }
   .setting b { font-size:.88rem; }
   .setting small { font-size:.76rem; }
   .section-gap { margin-top:12px; }

@@ -25,6 +25,11 @@ export const wallpaperPages = ['overview','records','reports','report-detail','p
 export const wallpaperVideos = ['video/mp4','video/webm','video/quicktime'];
 export const wallpaperImages = ['image/jpeg','image/png','image/gif','image/webp','image/avif','image/bmp','image/heic','image/heif'];
 export const ledgerFor = (root,id) => root.ledgers?.find(item=>item.id===id)?.data ?? root;
+export function wallpaperFor(root,page) {
+  const walls=root?.wallpapers;
+  const wall=walls?.[page] ?? walls?.overview;
+  return wall?.system ? undefined : wall;
+}
 
 function withDefaults(book) {
   if (book.debts===undefined) book={...book,debts:[]};
@@ -148,6 +153,7 @@ export function validate(book) {
   const wallpapers=book.wallpapers ?? {};
   if (typeof wallpapers!=='object' || Array.isArray(wallpapers) ||
       Object.entries(wallpapers).some(([page,wall])=>!wallpaperPages.includes(page) || !wall ||
+        (wall.system!==undefined && (wall.system!==true || page==='overview' || wall.color || wall.media!==undefined)) ||
         !(wall.color==='' || /^#[a-fA-F0-9]{6}$/.test(wall.color)) ||
         !Number.isInteger(wall.shade) || wall.shade<0 || wall.shade>85 || !['cover','contain'].includes(wall.fit) ||
         !['center','top','bottom'].includes(wall.position) ||
