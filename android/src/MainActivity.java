@@ -230,7 +230,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void downloadUpdate(int version) {
+    private void downloadUpdate(int version,boolean automatic) {
         DownloadManager downloads=getSystemService(DownloadManager.class);
         SharedPreferences jobs=getSharedPreferences("update-downloads",MODE_PRIVATE);
         String key=Integer.toString(version);
@@ -239,6 +239,7 @@ public final class MainActivity extends Activity {
             if (previous!=0) {
                 Uri apk=downloads.getUriForDownloadedFile(previous);
                 if (apk!=null) {
+                    if (automatic) return;
                     startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(apk,APK_MIME)
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
                     return;
@@ -247,7 +248,7 @@ public final class MainActivity extends Activity {
                     if (rows!=null && rows.moveToFirst()) {
                         int status=rows.getInt(rows.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
                         if (status!=DownloadManager.STATUS_FAILED) {
-                            toast("更新包正在下载，完成后可从系统通知安装。");
+                            if (!automatic) toast("更新包正在下载，完成后可从系统通知安装。");
                             return;
                         }
                     }
@@ -259,9 +260,9 @@ public final class MainActivity extends Activity {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalFilesDir(this,Environment.DIRECTORY_DOWNLOADS,"daily-ledger-"+version+".apk");
             jobs.edit().putLong(key,downloads.enqueue(request)).apply();
-            toast("已开始下载，完成后从系统通知打开 APK。");
+            if (!automatic) toast("已开始下载，完成后从系统通知打开 APK。");
         } catch (Exception error) {
-            toast("无法打开下载或安装窗口，请在系统中查看下载和安装权限。");
+            if (!automatic) toast("无法打开下载或安装窗口，请在系统中查看下载和安装权限。");
         }
     }
 
@@ -280,7 +281,10 @@ public final class MainActivity extends Activity {
             catch (Exception error) { return Integer.MAX_VALUE; }
         }
         @JavascriptInterface public void openUpdate(int version) {
-            if (version>versionCode()) runOnUiThread(()->downloadUpdate(version));
+            if (version>versionCode()) runOnUiThread(()->downloadUpdate(version,false));
+        }
+        @JavascriptInterface public void prepareUpdate(int version) {
+            if (version>versionCode()) runOnUiThread(()->downloadUpdate(version,true));
         }
         @JavascriptInterface public int reminderState() {
             return (DebtAlarmReceiver.enabled(MainActivity.this)?1:0)+(DebtAlarmReceiver.exact(MainActivity.this)?2:0);

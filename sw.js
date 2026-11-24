@@ -1,7 +1,7 @@
 'use strict';
 
 const prefix = 'daily-ledger-shell-';
-const cacheName = prefix + '1.5.0';
+const cacheName = prefix + '1.5.1';
 const base = new URL(self.registration.scope);
 const assets = [
   ['./','text/html'], ['./style.css','text/css'], ['./app.js','javascript'],
@@ -46,4 +46,8 @@ self.addEventListener('fetch', event => {
   asset.hash='';
   if (!known.has(asset.href)) return;
   event.respondWith(caches.open(cacheName).then(async cache => (await cache.match(asset.href,{ignoreVary:true})) ?? fetch(event.request)));
+});
+
+self.addEventListener('message',event=>{
+  if (event.data==='ledger-version') event.ports[0]?.postMessage({version:cacheName.slice(prefix.length)});
 });

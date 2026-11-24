@@ -20,14 +20,29 @@ const toast = $('#toast');
 const [currentRelease] = releases;
 const appVersion = currentRelease.version;
 const releaseSeenKey = 'daily-ledger-seen-release';
+const updateViewKey = 'daily-ledger-update-view';
 const ui = {
   month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
   monthOverviewYear:Number(today().slice(0,4)),
+  entrySelection:null,
 };
 const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
 let pendingRefresh=0, refreshing=false;
+let runningActions=0, pickingFile=false, updateScroll;
+try {
+  const view=JSON.parse(sessionStorage.getItem(updateViewKey));
+  sessionStorage.removeItem(updateViewKey);
+  if (view && validMonth(view.month)) {
+    ui.month=view.month;
+    ui.filter=view.filter;
+    ui.limit=view.limit;
+    ui.year=view.year;
+    ui.monthOverviewYear=view.monthOverviewYear;
+    updateScroll=view.scroll;
+  }
+} catch {}
 let installPrompt;
 const isInstalled=()=>!!android || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
@@ -56,6 +71,7 @@ function route(resetScroll=false) {
   const hash = location.hash.slice(1);
   const previous=page;
   page = Object.hasOwn(pages,hash) ? hash : 'overview';
+  if (page!=='records') ui.entrySelection=null;
   render();
   if (page==='updates') markReleaseSeen();
   if (resetScroll) scrollTo(0,0);
@@ -89,6 +105,11 @@ function render() {
     content.innerHTML = `<section class="panel system-message"><h1>无法打开本机账本</h1><p>${esc(storageError)}</p><p>请退出无痕模式，并从添加到主屏幕的图标重新打开。</p><p><button class="button primary" data-action="reload" type="button">重试</button></p></section>`;
   } else if (book) {
     content.innerHTML = pages[page](book,ui);
+    if (updateScroll!==undefined) {
+      const y=updateScroll;
+      updateScroll=undefined;
+      requestAnimationFrame(()=>scrollTo(0,y));
+    }
   }
   if (book || storageError) content.setAttribute('aria-busy','false');
 }
@@ -293,6 +314,20 @@ function openBatch() {
   '<button type="button" class="button secondary" data-action="add-batch-row">＋ 再加一笔</button><button type="submit" class="button primary" id="batch-submit">保存</button>');
   appendBatchRow(fields);
   fitBatchSheet();
+}
+
+function openBulkDateTime() {
+  const ids=[...ui.entrySelection];
+  if (!ids.length) return;
+  const dateModes={keep:'保留原日期',set:'改成同一天'};
+  const timeModes={keep:'保留原时间',set:'设为同一时间',clear:'清除时间'};
+  modalFrame({kind:'bulk-datetime',ids},'批量改时间',`
+    <p>已选 ${ids.length} 笔账目。</p>
+    ${label('日期',`<select name="date-mode">${optionMap(dateModes,'keep')}</select>`)}
+    <fieldset class="bulk-field" data-bulk-field="date" disabled hidden>${label('新日期',dateInput('date',today()))}</fieldset>
+    ${label('具体时间',`<select name="time-mode">${optionMap(timeModes,'keep')}</select>`)}
+    <fieldset class="bulk-field" data-bulk-field="time" disabled hidden>${label('新时间','<input type="time" name="time" required>')}</fieldset>`,
+    cancel+submit(`保存 ${ids.length} 笔`));
 }
 
 function batchDate(offset) {
@@ -519,7 +554,9 @@ function openOffline() {
     </ul>`}
     <p>${android?'账目和附件存放在此 App 内，可以断网记账。':'安装后先从图标联网打开一次。显示「离线可用」后就能断网记账。'}跨设备可通过 JSON 备份迁移。</p>
     <p>当前版本 <strong>${appVersion}</strong></p>
-    <p>联网时会自动检查更新。新版就绪后，页面顶部会出现「${android?'下载更新':'立即更新'}」。</p>
+    <p>${android?'联网时小更新会自动下载。安装时请按系统提示确认。':'联网时自动检查，小更新会在页面空闲时应用。'}</p>
+    <button type="button" class="button secondary" data-action="check-update">检查更新</button>
+    <p id="manual-update-status" aria-live="polite" hidden></p>
     <button type="button" class="button neutral" data-action="show-releases">版本更新</button>
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
 }
@@ -534,6 +571,19 @@ async function installApp() {
     dialog.close();
     tell('已确认安装，请从桌面或主屏幕打开。');
   }
+}
+
+async function manualCheckUpdate() {
+  const status=$('#manual-update-status');
+  status.hidden=false;
+  if (!navigator.onLine) {
+    status.textContent='联网后可以检查更新。';
+    return;
+  }
+  status.textContent='正在检查更新…';
+  const checked=await checkUpdate(true);
+  status.textContent=updateReady||nativeRelease?'新版已就绪，关闭窗口可查看。':
+    checked?'已检查，检测到新版后会在页面顶部提示。':'暂时无法检查更新，请稍后再试。';
 }
 
 function showNativeUpdate() {
@@ -568,6 +618,28 @@ async function commit(change, message, afterWrite, files) {
   dialog.close();
   route();
   if (message) tell(message,true);
+}
+
+async function saveBulkDateTime(state,get) {
+  const dateMode=get('date-mode'), timeMode=get('time-mode');
+  const date=get('date'), time=get('time');
+  must(['keep','set'].includes(dateMode) && ['keep','set','clear'].includes(timeMode),'请选择修改方式。');
+  must(dateMode!=='keep' || timeMode!=='keep','请选择要修改的日期或时间。');
+  if (dateMode==='set') must(validDate(date),'请选择有效日期。');
+  if (timeMode==='set') must(time && validTime(time),'请填写有效时间。');
+  const ids=new Set(state.ids);
+  await commit(current=>{
+    const entries=current.entries.filter(entry=>ids.has(entry.id));
+    must(entries.length===ids.size,'有选中的账目已被移除，请返回明细重新选择。');
+    for (const entry of entries) {
+      if (dateMode==='set') entry.date=date;
+      if (timeMode==='set') entry.time=time;
+      if (timeMode==='clear') delete entry.time;
+    }
+  },`已更新 ${ids.size} 笔账目`,()=>{
+    ui.entrySelection=null;
+    if (dateMode==='set' && !ui.filter.all) ui.month=date.slice(0,7);
+  });
 }
 
 function makeEntry(current, type, get, date, note, id=uid()) {
@@ -725,6 +797,8 @@ async function submitModal(event) {
         ui.month=date.slice(0,7);
         ui.limit=50;
       },files);
+    } else if (state.kind==='bulk-datetime') {
+      await saveBulkDateTime(state,get);
     } else if (state.kind==='debt-reminder') {
       book=await writeBook(current=>save[state.kind](current,state,get));
       channel?.postMessage('change');
@@ -746,6 +820,7 @@ async function submitModal(event) {
 }
 
 function chooseFile(mode) {
+  pickingFile=true;
   fileMode=mode;
   fileInput.accept=mode==='csv'?'.csv,text/csv':'.json,application/json';
   fileInput.value='';
@@ -783,6 +858,16 @@ async function inspectFile() {
 function renderRecordResults() {
   const section=$('#records-list');
   if (section) section.innerHTML=recordsList(book,ui);
+}
+
+const visibleEntryChecks=()=>[...content.querySelectorAll('[data-select-entry]')];
+
+function updateSelection() {
+  const count=ui.entrySelection.size;
+  $('#selection-summary').textContent=`已选 ${count} 笔`;
+  $('[data-action="bulk-datetime"]').disabled=!count;
+  const checks=visibleEntryChecks();
+  $('[data-action="select-visible"]').textContent=checks.every(check=>check.checked)?'取消全选':'全选已显示';
 }
 
 const actions = {
@@ -825,6 +910,21 @@ const actions = {
   },
   entry:id=>{ const entry=book.entries.find(e=>e.id===id); if (entry) openEntry(entry); },
   'entry-type':setEntryType,
+  'select-entries':()=>{
+    ui.entrySelection=ui.entrySelection ? null : new Set();
+    renderRecordResults();
+  },
+  'select-visible':()=>{
+    const checks=visibleEntryChecks();
+    const select=checks.some(check=>!check.checked);
+    for (const check of checks) {
+      check.checked=select;
+      if (select) ui.entrySelection.add(check.dataset.selectEntry);
+      else ui.entrySelection.delete(check.dataset.selectEntry);
+    }
+    updateSelection();
+  },
+  'bulk-datetime':openBulkDateTime,
   budget:id=>openBudget(book.budgets.find(b=>b.id===id)),
   account:id=>openAccount(accountOf(book,id)),
   group:id=>openGroup(groupOf(book,id)),
@@ -836,7 +936,10 @@ const actions = {
   'category-kind':id=>{ ui.categoryKind=id; render(); },
   period:id=>{
     const month=shiftMonth(ui.month,Number(id)*(page==='reports'&&ui.year?12:1));
-    if (validMonth(month)) ui.month=month;
+    if (validMonth(month)) {
+      ui.month=month;
+      ui.entrySelection?.clear();
+    }
     ui.limit=50;
     render();
   },
@@ -851,7 +954,7 @@ const actions = {
   },
   'select-month':finishMonthOverview,
   'close-months':()=>finishMonthOverview(),
-  'filter-scope':id=>{ ui.filter.all=id==='all'; ui.limit=50; render(); },
+  'filter-scope':id=>{ ui.filter.all=id==='all'; ui.entrySelection?.clear(); ui.limit=50; render(); },
   'report-range':id=>{ ui.year=id==='year'; render(); },
   'load-more':()=>{ ui.limit+=50; renderRecordResults(); },
   close:()=>{ if (!busy) dialog.close(); },
@@ -866,6 +969,7 @@ const actions = {
   'dismiss-release':markReleaseSeen,
   'ask-delete':askDelete,
   'offline-info':openOffline,
+  'check-update':manualCheckUpdate,
   'install-app':installApp,
   'pick-csv':()=>chooseFile('csv'),
   'pick-backup':()=>chooseFile('backup'),
@@ -889,20 +993,33 @@ document.addEventListener('click',async event=>{
   const {action,id}=button.dataset;
   if (!book && !['reload','offline-info','close'].includes(action)) return;
   if (!Object.hasOwn(actions,action)) return;
+  runningActions++;
   try { await actions[action](id,button); }
   catch (error) { if (dialog.open) errorInModal(showError(error)); else tell(showError(error)); }
+  finally { runningActions--; }
 });
 document.addEventListener('submit',submitModal);
 document.addEventListener('input',event=>{
-  const key=event.target.dataset.filter;
+  const {filter:key,selectEntry}=event.target.dataset;
+  if (selectEntry && ui.entrySelection) {
+    if (event.target.checked) ui.entrySelection.add(selectEntry);
+    else ui.entrySelection.delete(selectEntry);
+    updateSelection();
+    return;
+  }
   if (!key) return;
   ui.filter[key]=event.target.value;
+  ui.entrySelection?.clear();
   ui.limit=50;
   renderRecordResults();
 });
 document.addEventListener('change',event=>{
   if (!dialog.open) return;
   const {name,value}=event.target;
+  if (modal.kind==='bulk-datetime' && (name==='date-mode' || name==='time-mode')) {
+    const field=dialog.querySelector(`[data-bulk-field="${name.split('-')[0]}"]`);
+    field.hidden=field.disabled=value!=='set';
+  }
   if (modal.kind==='rule' && name==='type') {
     $('#modal-form [name=category]').innerHTML=categoryOptions(book,value);
   }
@@ -930,7 +1047,7 @@ if (/iP(?:ad|hone|od)/.test(navigator.userAgent) || (navigator.platform==='MacIn
   let touchStart, lastTap;
   const resetTaps=()=>{ touchStart=lastTap=undefined; };
   document.addEventListener('touchstart',event=>{
-    if (event.touches.length!==1 || event.target.closest('dialog button, input, select, textarea, label')) {
+    if (event.touches.length!==1 || event.target.closest('dialog button, #records-list button, input, select, textarea, label')) {
       resetTaps();
       return;
     }
@@ -955,7 +1072,11 @@ if (/iP(?:ad|hone|od)/.test(navigator.userAgent) || (navigator.platform==='MacIn
   },{passive:false});
   document.addEventListener('touchcancel',resetTaps,{passive:true});
 }
-fileInput.addEventListener('change',inspectFile);
+fileInput.addEventListener('change',async()=>{
+  try { await inspectFile(); }
+  finally { pickingFile=false; }
+});
+fileInput.addEventListener('cancel',()=>{ pickingFile=false; });
 categoryDialog.addEventListener('submit',saveQuickCategory);
 categoryDialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
 dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
@@ -980,6 +1101,7 @@ document.addEventListener('visibilitychange',()=>{
   if (document.visibilityState!=='visible') return;
   if (book) refresh(true);
   if (!dialog.open) checkUpdate();
+  queueAutomaticReload();
 });
 if (channel) channel.onmessage=()=>refresh();
 
@@ -998,6 +1120,32 @@ catch {}
 let lastController = workers?.controller;
 let registrationJob, updateJob, lastUpdateCheck=0, updateReady=false;
 let nativeRelease;
+let automaticReload=false, automaticTimer;
+
+function isPatchUpdate(version) {
+  if (typeof version!=='string' || !/^\d+\.\d+\.\d+$/.test(version)) return false;
+  const [major,minor,patch]=appVersion.split('.').map(Number);
+  const [nextMajor,nextMinor,nextPatch]=version.split('.').map(Number);
+  return major===nextMajor && minor===nextMinor && nextPatch>patch;
+}
+
+function queueAutomaticReload() {
+  clearTimeout(automaticTimer);
+  if (!automaticReload || document.visibilityState!=='visible') return;
+  automaticTimer=setTimeout(()=>{
+    if (document.visibilityState!=='visible') return;
+    if (!book || dialog.open || busy || refreshing || pickingFile || runningActions || ui.entrySelection ||
+      document.activeElement?.matches('input,select,textarea,[contenteditable="true"]')) {
+      queueAutomaticReload();
+      return;
+    }
+    try {
+      const {month,filter,limit,year,monthOverviewYear}=ui;
+      sessionStorage.setItem(updateViewKey,JSON.stringify({month,filter,limit,year,monthOverviewYear,scroll:scrollY}));
+    } catch {}
+    location.reload();
+  },1600);
+}
 
 function markReleaseSeen() {
   if (seenRelease===appVersion) return;
@@ -1007,26 +1155,30 @@ function markReleaseSeen() {
   catch {}
 }
 
-async function checkUpdate() {
+async function checkUpdate(manual=false) {
+  if (updateJob) return updateJob;
+  if (!navigator.onLine || (!manual && Date.now()-lastUpdateCheck<60000)) return false;
   if (android) {
-    if (updateJob || !navigator.onLine || Date.now()-lastUpdateCheck<60000) return;
     lastUpdateCheck=Date.now();
     updateJob=fetch('/native-update.json',{cache:'no-store'}).then(async response=>{
-      if (!response.ok) return;
+      if (!response.ok) return false;
       const release=await response.json();
       if (!Number.isSafeInteger(release.versionCode) || release.versionCode<=android.versionCode() ||
           typeof release.version!=='string' || !/^\d+\.\d+\.\d+$/.test(release.version) ||
-          !Array.isArray(release.changes) || !release.changes.every(change=>typeof change==='string')) return;
+          !Array.isArray(release.changes) || !release.changes.every(change=>typeof change==='string')) return true;
       nativeRelease=release;
       releaseNotice.hidden=true;
       updateNotice.hidden=false;
       $('#update-title').textContent=`可更新至 ${release.version}`;
       $('#update-changes').hidden=false;
-      $('#update-notice [data-action="reload"]').textContent='下载更新';
-    }).catch(()=>{}).finally(()=>{updateJob=undefined;});
+      const auto=isPatchUpdate(release.version) && android.prepareUpdate;
+      if (auto) android.prepareUpdate(release.versionCode);
+      $('#update-notice [data-action="reload"]').textContent=auto?'安装更新':'下载更新';
+      return true;
+    }).catch(()=>false).finally(()=>{updateJob=undefined;});
     return updateJob;
   }
-  if (!workers || !navigator.onLine || updateReady || updateJob || Date.now()-lastUpdateCheck<60000) return;
+  if (!workers || updateReady) return updateReady;
   lastUpdateCheck=Date.now();
   registrationJob ??= workers.register('./sw.js',{updateViaCache:'none'}).catch(error=>{
     registrationJob=undefined;
@@ -1034,25 +1186,35 @@ async function checkUpdate() {
   });
   updateJob=registrationJob.then(async registration=>{
     if (registration.active && !registration.installing && !registration.waiting) await registration.update();
-  });
-  try {
-    await updateJob;
-  } catch {
-    // A later foreground or online event retries the check.
-  } finally {
-    updateJob=undefined;
-  }
+    return true;
+  }).catch(()=>false).finally(()=>{updateJob=undefined;});
+  return updateJob;
 }
 
 workers?.addEventListener('controllerchange',()=>{
-  if (lastController && workers.controller && workers.controller!==lastController) {
+  const controller=workers.controller;
+  if (lastController && controller && controller!==lastController) {
     updateReady=true;
     if (updateNotice) updateNotice.hidden=false;
     releaseNotice.hidden=true;
+    automaticReload=false;
+    const info=new MessageChannel();
+    info.port1.onmessage=event=>{
+      info.port1.close();
+      if (workers.controller!==controller || !isPatchUpdate(event.data?.version)) return;
+      automaticReload=true;
+      $('#update-title').textContent='小更新已就绪，空闲后自动更新';
+      queueAutomaticReload();
+    };
+    controller.postMessage('ledger-version',[info.port2]);
+    setTimeout(()=>info.port1.close(),3000);
   }
-  lastController=workers.controller;
+  lastController=controller;
   offlineStatus();
 });
+for (const action of ['pointerdown','keydown','scroll']) {
+  window.addEventListener(action,()=>{ if (automaticReload) queueAutomaticReload(); },{passive:true});
+}
 window.addEventListener('online',()=>{
   lastUpdateCheck=0;
   offlineStatus();

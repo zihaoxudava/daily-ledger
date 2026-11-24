@@ -107,7 +107,7 @@ export function categoryOptions(book, type, chosen='', emptyLabel='请选择分�
 export const groupOptions = (book,chosen,kind) => book.groups.filter(g => !kind || g.type===kind)
   .map(g => option(g.id,`${g.name}${kind ? '' : ' · ' + types[g.type]}`,chosen)).join('');
 
-export function entryRow(book, entry) {
+export function entryRow(book, entry, selection=null) {
   const category = categoryOf(book,entry.category);
   const title = entry.note || (entry.type === 'transfer' ? '账户转账' : category.name);
   const from = accountOf(book,entry.account).name;
@@ -116,9 +116,14 @@ export function entryRow(book, entry) {
     entry.attachments?.length ? `${entry.attachments.length} 个附件` : ''].filter(Boolean).join(' · ');
   const symbol = entry.type === 'expense' ? '−' : entry.type === 'transfer' ? '' : '+';
   const mark = entry.type === 'transfer' ? icon('transfer') : esc(groupOf(book,category.group).icon);
+  const body=`<span><span class="entry-title">${esc(title)}</span><span class="entry-caption">${esc(details)}</span></span>
+    <strong class="number ${symbol==='+'?'positive':''}">${symbol}${money(entry.amount)}</strong>`;
+  if (selection) {
+    return `<label class="transaction record-pick">
+      <input type="checkbox" data-select-entry="${entry.id}" aria-label="选中 ${esc(title)}"${selection.has(entry.id)?' checked':''}>${body}</label>`;
+  }
   return `<button class="transaction" type="button" data-action="entry" data-id="${entry.id}">
-    <span class="tx-icon">${mark}</span><span><span class="entry-title">${esc(title)}</span><span class="entry-caption">${esc(details)}</span></span>
-    <strong class="number ${symbol==='+'?'positive':''}">${symbol}${money(entry.amount)}</strong></button>`;
+    <span class="tx-icon">${mark}</span>${body}</button>`;
 }
 
 const colors = ['#3e7859','#90a94b','#5076a2','#ba845a','#846c9f','#c09b49','#5a928f','#bd727a'];
@@ -226,8 +231,16 @@ export function recordsList(book,ui) {
     if (!groups.has(entry.date)) groups.set(entry.date,[]);
     groups.get(entry.date).push(entry);
   }
-  return `<div class="panel-head"><h2>账目 <span class="muted">· ${list.length} 笔</span></h2>${list.length?button('导出当前结果','export-filter','neutral'):''}</div>` + (list.length
-    ? [...groups].map(([day,rows]) => `<section class="date-group"><h3 class="date-heading">${day}</h3><div class="transactions">${rows.map(e=>entryRow(book,e)).join('')}</div></section>`).join('')
+  const selection=ui.entrySelection;
+  const actions=selection ? button('退出多选','select-entries','neutral') : list.length?
+    button('多选','select-entries')+button('导出当前结果','export-filter','neutral') : '';
+  const toolbar=selection?`<div class="record-selection">
+      <span id="selection-summary" role="status">已选 ${selection.size} 笔</span>
+      <button type="button" class="button neutral" data-action="select-visible"${visible.length?'':' disabled'}>${visible.length && visible.every(entry=>selection.has(entry.id))?'取消全选':'全选已显示'}</button>
+      <button type="button" class="button primary" data-action="bulk-datetime"${selection.size?'':' disabled'}>批量改时间</button>
+    </div>`:'';
+  return `<div class="panel-head"><h2>账目 <span class="muted">· ${list.length} 笔</span></h2><div class="actions">${actions}</div></div>` + toolbar + (list.length
+    ? [...groups].map(([day,rows]) => `<section class="date-group"><h3 class="date-heading">${day}</h3><div class="transactions">${rows.map(e=>entryRow(book,e,selection)).join('')}</div></section>`).join('')
     : empty('records','没有匹配的账目','可以换个筛选条件，或者记一笔。')) +
     (list.length>visible.length ? `<div class="section-gap">${button('显示更多','load-more','secondary')}</div>` : '');
 }
