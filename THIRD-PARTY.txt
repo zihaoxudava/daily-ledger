@@ -23,3 +23,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Twemoji graphics
+Copyright Twitter, Inc. and other contributors.
+Maintained by jdecked/twemoji: https://github.com/jdecked/twemoji/tree/v15.1.0
+The Android daily reminders use the original PNG illustrations 1f375 (tea),
+1f4d2 (notebook), and 1f331 (seedling) from Twemoji v15.1.0.
+Graphics license: Creative Commons Attribution 4.0 International.
+https://creativecommons.org/licenses/by/4.0/

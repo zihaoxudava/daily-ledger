@@ -34,6 +34,7 @@ foreach ($file in $siteFiles) {
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $www -Recurse -Force
 }
 Copy-Item (Join-Path $root 'icon-512.png') (Join-Path $resources 'drawable-nodpi\ledger_icon.png') -Force
+Copy-Item (Join-Path $PSScriptRoot 'res\drawable-nodpi\*.png') (Join-Path $resources 'drawable-nodpi') -Force
 Copy-Item (Join-Path $PSScriptRoot 'res\values') -Destination $resources -Recurse -Force
 
 $sources = (Get-ChildItem (Join-Path $PSScriptRoot 'src') -Filter '*.java').FullName

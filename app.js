@@ -2,7 +2,7 @@ import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
 import { today, shiftMonth, uid, money, parseMoney, readBook as readRoot, readBackup, writeBook as writeRoot, applyRecurring, hasDueRecurring, validate,
   validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf,
   initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, wallpaperFor,
-  defaultWallpaperTransparency, readAttachment, MAX_AMOUNT } from './store.js';
+  defaultWallpaperTransparency, defaultDailyCheckInTimes, validDailyCheckInTimes, readAttachment, MAX_AMOUNT } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
@@ -888,6 +888,47 @@ function reminderCalendar() {
   return download(title+'.ics',calendar,'text/calendar;charset=utf-8');
 }
 
+function updateDailyCheckInStatus() {
+  const status=$('#daily-check-in-status');
+  if (!status || !android?.dailyCheckInAllowed) return;
+  const allowed=android.dailyCheckInAllowed();
+  status.textContent=allowed?'提醒会在本机生成。系统省电时可能稍晚送达。':'请允许系统通知，才能收到提醒。';
+  $('#daily-check-in-permission').hidden=allowed;
+}
+
+function openDailyCheckIn() {
+  const config=ui.root.dailyCheckIn ?? {enabled:true,times:defaultDailyCheckInTimes};
+  const fields=config.times.map((time,i)=>label(['上午','下午','晚上'][i],
+    `<input name="daily-time-${i}" type="time" value="${esc(time)}" required>`)).join('');
+  modalFrame({kind:'daily-check-in'},'日常记账提醒',
+    `${android?`<label class="option-check"><input type="checkbox" name="enabled"${config.enabled?' checked':''}>接收每日三次提醒</label>`:''}
+    ${fields}
+    ${android?`<p id="daily-check-in-status" aria-live="polite"></p>
+      <button id="daily-check-in-permission" type="button" class="button neutral" data-action="reminder-settings" data-id="notifications">打开系统通知设置</button>`:
+      `<p>下载后将三个重复事件导入系统日历。日历里的提醒可以单独修改或删除。</p>`}`,
+    cancel+submit(android?'保存':'保存并下载日历'));
+  updateDailyCheckInStatus();
+}
+
+function dailyCheckInCalendar(times) {
+  const stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z');
+  const now=new Date();
+  const titles=['🍵 早安，顺手记一笔','📒 午休，看看今天的账','🌱 今晚给账本收个尾'];
+  const events=times.flatMap((time,index)=>{
+    const start=new Date(`${today()}T${time}`);
+    if (start<=now) start.setDate(start.getDate()+1);
+    const day=[start.getFullYear(),start.getMonth()+1,start.getDate()].map(n=>String(n).padStart(2,'0')).join('');
+    const title=titles[index];
+    return ['BEGIN:VEVENT',`UID:daily-check-in-${index}@daily-ledger`,`DTSTAMP:${stamp}`,
+      `DTSTART:${day}T${time.replace(':','')}00`,'DURATION:PT5M','RRULE:FREQ=DAILY',
+      `SUMMARY:${title}`,'BEGIN:VALARM','ACTION:DISPLAY','TRIGGER:PT0M',
+      `DESCRIPTION:${title}`,'END:VALARM','END:VEVENT'];
+  });
+  return download('日常账本-每日提醒.ics',
+    ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Daily Ledger//Daily Check-In//ZH',...events,'END:VCALENDAR',''].join('\r\n'),
+    'text/calendar;charset=utf-8');
+}
+
 function openDebtPayment(debt,payment) {
   const available=debtRemaining(debt)+(payment?.amount ?? 0);
   const lent=debt.direction==='lent';
@@ -1336,6 +1377,12 @@ async function submitModal(event) {
       const config={enabled:data.has('enabled'),ledger:get('ledger'),wechat:get('wechat'),alipay:get('alipay')};
       must(!config.enabled || config.wechat || config.alipay,'请为至少一个平台选择账户。');
       await commit(current=>{ current.autoCapture=config; },'已保存自动记账设置',undefined,undefined,true);
+    } else if (state.kind==='daily-check-in') {
+      const times=[0,1,2].map(i=>get(`daily-time-${i}`));
+      must(validDailyCheckInTimes(times),'请输入三个不同的时间，按早到晚排列。');
+      const enabled=android?data.has('enabled'):ui.root.dailyCheckIn?.enabled ?? true;
+      await commit(current=>{ current.dailyCheckIn={enabled,times}; },'已保存提醒设置',undefined,undefined,true);
+      if (!android) await dailyCheckInCalendar(times);
     } else if (state.kind==='csv') {
       let summary;
       await commit(current=>{ summary=importCSV(current,state.raw); });
@@ -1456,6 +1503,7 @@ const actions = {
   wallpaper:openWallpaper,
   'original-wallpaper':setOriginalWallpaper,
   'configure-auto':configureAuto,
+  'daily-check-in':openDailyCheckIn,
   'payment-settings':()=>android?.paymentSettings(),
   batch:openBatch,
   'new-debt':direction=>openDebt(null,direction),
@@ -1854,6 +1902,7 @@ window.addEventListener('offline',offlineStatus);
 window.addEventListener('nativeforeground',()=>{
   if (!dialog.open) checkUpdate();
   updateReminderStatus();
+  updateDailyCheckInStatus();
   capturePayments();
   if (page==='auto' && book && !dialog.open) render();
 });

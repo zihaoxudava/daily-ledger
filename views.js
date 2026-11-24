@@ -414,7 +414,7 @@ function savingDetail(book,ui) {
       ${deposits.length>ui.depositLimit?`<div class="section-gap">${button('显示更多','more-saving-deposits')}</div>`:''}</section>`;
 }
 
-function settings() {
+function settings(book,ui) {
   return header('更多','管理账户、分类与本机数据')+`
     <section class="panel">${panelHead('账本管理')}<div class="setting-grid">
     ${setting('wallet','账户','余额、期初金额和账户归档','','#accounts')}
@@ -424,6 +424,7 @@ function settings() {
     ${setting('wallet','定期存款','设置每日存款，查看应存、待存和实存','','#savings')}
     ${setting('file','数据与备份','完整备份、CSV 和恢复','','#files')}
     ${setting('overview','页面外观','单独设置各页的颜色、图片、动图或视频','','#appearance')}
+    ${setting('plan','日常记账提醒',android?(ui.root.dailyCheckIn?.enabled===false?'已关闭':'每天三次 · 可改时间'):'导出每天三次的日历提醒','daily-check-in')}
     ${android?setting('check','自动记账','识别微信、支付宝付款通知','','#auto'):''}
     </div></section>
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">

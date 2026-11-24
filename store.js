@@ -25,6 +25,7 @@ export const wallpaperPages = ['overview','records','reports','report-detail','p
 export const wallpaperVideos = ['video/mp4','video/webm','video/quicktime'];
 export const wallpaperImages = ['image/jpeg','image/png','image/gif','image/webp','image/avif','image/bmp','image/heic','image/heif'];
 export const defaultWallpaperTransparency = 25;
+export const defaultDailyCheckInTimes = ['09:00','13:00','20:30'];
 export const ledgerFor = (root,id) => root.ledgers?.find(item=>item.id===id)?.data ?? root;
 export function wallpaperFor(root,page) {
   const walls=root?.wallpapers;
@@ -131,6 +132,8 @@ export const validDate = date => typeof date === 'string' && /^20\d{2}-(0[1-9]|1
 export const validMonth = month => typeof month === 'string' && validDate(`${month}-01`);
 export const validTime = time => time === undefined || time === '' ||
   typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+export const validDailyCheckInTimes = times=>Array.isArray(times) && times.length===3 &&
+  times.every((time,index)=>typeof time==='string' && time!=='' && validTime(time) && (!index || time>times[index-1]));
 export const newestFirst = (a,b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? '');
 export const dateAndTime = ({date,time}) => time ? `${date} ${time}` : date;
 const validId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
@@ -149,10 +152,15 @@ function indexList(items, predicate, limit) {
 
 export function validate(book) {
   book=validateLedger(book);
+  if (book.dailyCheckIn!==undefined && (!book.dailyCheckIn ||
+      typeof book.dailyCheckIn.enabled!=='boolean' || !validDailyCheckInTimes(book.dailyCheckIn.times))) {
+    throw new Error('日常提醒需要三个不同的时间，按早到晚排列。');
+  }
   const ledgers=indexList(book.ledgers ?? [],item=>item.id!=='main' && validText(item.name,28) &&
     validText(item.description,100,true) && ledgerStyles.includes(item.style) && ledgerIcons.includes(item.icon),20);
   for (const item of ledgers.values()) {
-    if (item.data?.ledgers!==undefined || item.data?.wallpapers!==undefined || item.data?.autoCapture!==undefined) {
+    if (item.data?.ledgers!==undefined || item.data?.wallpapers!==undefined || item.data?.autoCapture!==undefined ||
+        item.data?.dailyCheckIn!==undefined) {
       throw new Error('独立账本结构无效。');
     }
     item.data=validateLedger(item.data);

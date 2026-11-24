@@ -3,6 +3,7 @@ package com.zihaoxudava.dailyledger;
 import android.app.Activity;
 import android.Manifest;
 import android.app.DownloadManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -82,7 +83,8 @@ public final class MainActivity extends Activity {
         });
         String debtLedger=getIntent().getStringExtra(DebtAlarmReceiver.EXTRA_LEDGER);
         web.loadUrl("https://"+HOST+"/www/"+(getIntent().getBooleanExtra(DebtAlarmReceiver.EXTRA_DEBTS,false)
-            ?"?debtLedger="+Uri.encode(debtLedger==null?"main":debtLedger)+"#debts":""));
+            ?"?debtLedger="+Uri.encode(debtLedger==null?"main":debtLedger)+"#debts"
+            :getIntent().getBooleanExtra(DailyCheckInReceiver.EXTRA_OPEN,false)?"#records":""));
     }
 
     @Override protected void onResume() {
@@ -97,6 +99,8 @@ public final class MainActivity extends Activity {
             String ledger=intent.getStringExtra(DebtAlarmReceiver.EXTRA_LEDGER);
             web.evaluateJavascript("window.dispatchEvent(new CustomEvent('nativedebtopen',{detail:"+
                 JSONObject.quote(ledger==null?"main":ledger)+"}));",null);
+        } else if (web!=null && intent.getBooleanExtra(DailyCheckInReceiver.EXTRA_OPEN,false)) {
+            web.evaluateJavascript("if(!document.querySelector('dialog[open]')) location.hash='records';",null);
         }
     }
 
@@ -109,7 +113,20 @@ public final class MainActivity extends Activity {
     }
 
     private void syncReminders() {
-        new Thread(()->DebtAlarmReceiver.sync(getApplicationContext(),false),"ledger-reminders").start();
+        new Thread(()->{
+            Context context=getApplicationContext();
+            if (DailyCheckInReceiver.sync(context,false)) runOnUiThread(this::askCheckInPermission);
+            DebtAlarmReceiver.sync(context,false);
+        },"ledger-reminders").start();
+    }
+
+    private void askCheckInPermission() {
+        if (Build.VERSION.SDK_INT<33 || isFinishing() || isDestroyed() ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED) return;
+        SharedPreferences prefs=getPreferences(MODE_PRIVATE);
+        if (prefs.getBoolean("notification-asked",false)) return;
+        prefs.edit().putBoolean("notification-asked",true).apply();
+        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},3);
     }
 
     @Override public void onBackPressed() {
@@ -295,7 +312,12 @@ public final class MainActivity extends Activity {
             return answer(()->{ storage.append(token,id,content); return true; });
         }
         @JavascriptInterface public String commit(String token,String book,String sizes) {
-            return answer(()->{ storage.commit(token,book,sizes); DebtAlarmReceiver.sync(MainActivity.this,false); return true; });
+            return answer(()->{
+                storage.commit(token,book,sizes);
+                DailyCheckInReceiver.sync(MainActivity.this,false);
+                DebtAlarmReceiver.sync(MainActivity.this,false);
+                return true;
+            });
         }
         @JavascriptInterface public void discard(String token) { storage.discard(token); }
         @JavascriptInterface public int versionCode() {
@@ -311,6 +333,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public int reminderState() {
             return (DebtAlarmReceiver.enabled(MainActivity.this)?1:0)+(DebtAlarmReceiver.exact(MainActivity.this)?2:0);
         }
+        @JavascriptInterface public boolean dailyCheckInAllowed() { return DailyCheckInReceiver.allowed(MainActivity.this); }
         @JavascriptInterface public void reminderSettings(String kind) {
             runOnUiThread(()->{
                 try {
