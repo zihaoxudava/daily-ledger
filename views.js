@@ -424,7 +424,7 @@ function settings(book,ui) {
     ${setting('wallet','定期存款','设置每日存款，查看应存、待存和实存','','#savings')}
     ${setting('file','数据与备份','完整备份、CSV 和恢复','','#files')}
     ${setting('overview','页面外观','单独设置各页的颜色、图片、动图或视频','','#appearance')}
-    ${setting('plan','日常记账提醒',android?(ui.root.dailyCheckIn?.enabled===false?'已关闭':'每天三次 · 可改时间'):'导出每天三次的日历提醒','daily-check-in')}
+    ${setting('plan','日常记账提醒',android?(ui.root.dailyCheckIn?.enabled?'每天三次 · 可改时间':'未启用'):'导出每天三次的日历提醒','daily-check-in')}
     ${android?setting('check','自动记账','识别微信、支付宝付款通知','','#auto'):''}
     </div></section>
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">

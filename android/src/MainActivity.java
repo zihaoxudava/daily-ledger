@@ -115,18 +115,9 @@ public final class MainActivity extends Activity {
     private void syncReminders() {
         new Thread(()->{
             Context context=getApplicationContext();
-            if (DailyCheckInReceiver.sync(context,false)) runOnUiThread(this::askCheckInPermission);
+            DailyCheckInReceiver.sync(context,false);
             DebtAlarmReceiver.sync(context,false);
         },"ledger-reminders").start();
-    }
-
-    private void askCheckInPermission() {
-        if (Build.VERSION.SDK_INT<33 || isFinishing() || isDestroyed() ||
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED) return;
-        SharedPreferences prefs=getPreferences(MODE_PRIVATE);
-        if (prefs.getBoolean("notification-asked",false)) return;
-        prefs.edit().putBoolean("notification-asked",true).apply();
-        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},3);
     }
 
     @Override public void onBackPressed() {

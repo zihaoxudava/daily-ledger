@@ -61,10 +61,10 @@ public final class DailyCheckInReceiver extends BroadcastReceiver {
         return today.toString().equals(preferences.getString("date","")) ? preferences.getInt("sent",0) : 0;
     }
 
-    static synchronized boolean sync(Context context,boolean force) {
+    static synchronized void sync(Context context,boolean force) {
         try {
             JSONObject config=settings(LedgerStorage.get(context).readBook());
-            boolean enabled=config==null || config.optBoolean("enabled",true);
+            boolean enabled=config!=null && config.optBoolean("enabled",false);
             SharedPreferences preferences=prefs(context);
             AlarmManager manager=context.getSystemService(AlarmManager.class);
             NotificationManager notices=context.getSystemService(NotificationManager.class);
@@ -77,7 +77,7 @@ public final class DailyCheckInReceiver extends BroadcastReceiver {
                 if (pending!=null) { manager.cancel(pending); pending.cancel(); }
                 notices.cancel(NOTICE);
                 preferences.edit().remove("next").apply();
-                return enabled;
+                return;
             }
             LocalDateTime now=LocalDateTime.now();
             LocalDate today=now.toLocalDate();
@@ -89,7 +89,7 @@ public final class DailyCheckInReceiver extends BroadcastReceiver {
             if (slot==times.length) slot=0;
             long target=LocalDateTime.of(day,times[slot]).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
             boolean exact=DebtAlarmReceiver.exact(context);
-            if (!force && preferences.getLong("next",0)==target && preferences.getBoolean("exact",false)==exact) return true;
+            if (!force && preferences.getLong("next",0)==target && preferences.getBoolean("exact",false)==exact) return;
             PendingIntent pending=PendingIntent.getBroadcast(context,0,alarm(context).putExtra("slot",slot)
                 .putExtra("day",day.toString()).putExtra("time",times[slot].toString()),
                 PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
@@ -101,10 +101,8 @@ public final class DailyCheckInReceiver extends BroadcastReceiver {
                 }
             } else manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,target,pending);
             preferences.edit().putLong("next",target).putBoolean("exact",exact).apply();
-            return true;
         } catch (Exception error) {
             android.util.Log.w("DailyLedger","Could not schedule daily check-ins",error);
-            return false;
         }
     }
 
@@ -141,7 +139,7 @@ public final class DailyCheckInReceiver extends BroadcastReceiver {
     private static synchronized void deliver(Context context,Intent intent) throws Exception {
         JSONObject book=LedgerStorage.get(context).readBook();
         JSONObject config=settings(book);
-        if ((config!=null && !config.optBoolean("enabled",true)) || !allowed(context)) return;
+        if (config==null || !config.optBoolean("enabled",false) || !allowed(context)) return;
         LocalDateTime now=LocalDateTime.now();
         LocalDate today=now.toLocalDate();
         String day=today.toString();

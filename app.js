@@ -38,7 +38,10 @@ const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
 const ledgerKey='daily-ledger-active-book';
 const backupReminderKey='daily-ledger-backup-timestamp';
+const notificationIntroKey='daily-ledger-notification-intro';
 let backupStart=Date.now();
+let notificationIntroSeen=false;
+try { notificationIntroSeen=localStorage.getItem(notificationIntroKey)==='seen'; } catch {}
 try { ui.ledgerId=localStorage.getItem(ledgerKey) || 'main'; } catch {}
 let debtLaunch=new URL(location.href).searchParams.get('debtLedger');
 if (debtLaunch && android) history.replaceState(history.state,'',location.pathname+location.hash);
@@ -380,6 +383,7 @@ async function flushRefresh() {
     refreshing=false;
     if (!dialog.open && !busy) render();
     openDebtFromReminder();
+    offerNotificationIntro();
     flushRefresh();
     capturePayments();
   }
@@ -896,6 +900,21 @@ function updateDailyCheckInStatus() {
   $('#daily-check-in-permission').hidden=allowed;
 }
 
+function markNotificationIntroSeen() {
+  notificationIntroSeen=true;
+  try { localStorage.setItem(notificationIntroKey,'seen'); } catch {}
+}
+
+function offerNotificationIntro() {
+  if (notificationIntroSeen || !book || ui.root.dailyCheckIn || !isInstalled() || dialog.open || busy ||
+      document.visibilityState==='hidden') return;
+  const later='<button class="button neutral" type="submit" value="later">暂不开启</button>';
+  const enable=`<button class="button primary" type="submit" value="enable">${android?'启用通知':'设置日历提醒'}</button>`;
+  modalFrame({kind:'notification-intro'},'开启记账提醒？',
+    `<p>${android?'日常账本可以每天提醒三次，帮你顺手记账。':'可以把每天三次的记账提醒添加到系统日历。'}</p>
+    <p class="muted">之后可以在「更多 → 日常记账提醒」修改。</p>`,later+enable);
+}
+
 function openDailyCheckIn() {
   const config=ui.root.dailyCheckIn ?? {enabled:true,times:defaultDailyCheckInTimes};
   const fields=config.times.map((time,i)=>label(['上午','下午','晚上'][i],
@@ -1377,12 +1396,25 @@ async function submitModal(event) {
       const config={enabled:data.has('enabled'),ledger:get('ledger'),wechat:get('wechat'),alipay:get('alipay')};
       must(!config.enabled || config.wechat || config.alipay,'请为至少一个平台选择账户。');
       await commit(current=>{ current.autoCapture=config; },'已保存自动记账设置',undefined,undefined,true);
+    } else if (state.kind==='notification-intro') {
+      const enabled=submitter?.value==='enable';
+      if (android) {
+        await commit(current=>{ current.dailyCheckIn={enabled,times:[...defaultDailyCheckInTimes]}; },
+          enabled?'已启用日常提醒':'已关闭日常提醒',markNotificationIntroSeen,undefined,true);
+        if (enabled && !android.dailyCheckInAllowed()) android.reminderSettings('notifications');
+      } else {
+        markNotificationIntroSeen();
+        if (enabled) openDailyCheckIn();
+        else closeModal();
+      }
     } else if (state.kind==='daily-check-in') {
       const times=[0,1,2].map(i=>get(`daily-time-${i}`));
       must(validDailyCheckInTimes(times),'请输入三个不同的时间，按早到晚排列。');
       const enabled=android?data.has('enabled'):ui.root.dailyCheckIn?.enabled ?? true;
+      const justEnabled=enabled && !ui.root.dailyCheckIn?.enabled;
       await commit(current=>{ current.dailyCheckIn={enabled,times}; },'已保存提醒设置',undefined,undefined,true);
       if (!android) await dailyCheckInCalendar(times);
+      else if (justEnabled && !android.dailyCheckInAllowed()) android.reminderSettings('notifications');
     } else if (state.kind==='csv') {
       let summary;
       await commit(current=>{ summary=importCSV(current,state.raw); });
@@ -1756,6 +1788,7 @@ dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && m
 dialog.addEventListener('close',()=>{
   if (!dialog.open) {
     if (modal?.kind==='wallpaper') clearWallpaperPreview();
+    if (modal?.kind==='notification-intro') markNotificationIntroSeen();
     modal=undefined;
     if (!dialogExit) dialogContent.replaceChildren();
   }
