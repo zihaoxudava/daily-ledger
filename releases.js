@@ -1,5 +1,10 @@
 export const releases = [
   {
+    version:'1.5.3',
+    title:'总览顶部显示定期存款',
+    changes:['总览顶部新增定期存款卡片，点一下即可进入，并可直接查看已存和累计待存。'],
+  },
+  {
     version:'1.5.2',
     title:'定期存款与统计明细',
     changes:[

@@ -198,7 +198,15 @@ function overview(book, ui) {
   const assets = [...balances(book,today()).values()].reduce((sum,amount) => sum+amount,0);
   const shown = latest([...entries].reverse()).slice(0,5);
   const budgets = book.budgets.filter(b => b.month===ui.month).sort((a,b) => Number(!!a.group)-Number(!!b.group));
+  const savings=savingSnapshot(book);
+  const hasPlans=savings.plans.length>0;
   return header('总览','查看当月收支、预算和账户余额',period(ui.month)) + `
+    <a class="saving-entry" href="#savings">
+      <span class="saving-entry-icon">${icon('wallet')}</span>
+      <span class="saving-entry-title"><strong>定期存款</strong><small>${hasPlans?'已存 '+money(savings.total.actual):'设置每日存款计划'}</small></span>
+      ${hasPlans?`<span class="saving-entry-pending"><small>累计待存</small>${value(savings.total.pending)}</span>`:''}
+      ${icon('right')}
+    </a>
     <div class="top-grid">
       <section class="balance-card" aria-label="当月收支">
         <div class="balance-title">本期结余</div><div class="balance-value number">${money(net)}</div>
@@ -209,7 +217,6 @@ function overview(book, ui) {
         <div class="quick-heading"><h2>快速记账</h2>${button('批量记账','batch','secondary')}</div>
         <div class="quick-actions">${quick}</div>
         <a class="asset-inline" href="#accounts"><span>当前账户净余额</span>${value(assets)}</a>
-        <a class="asset-inline saving-shortcut" href="#savings"><span>定期存款</span>${icon('right')}</a>
       </section>
     </div>
     <div class="lower-grid">
@@ -342,7 +349,7 @@ function savingSummary(result) {
   ].map(([title,amount])=>`<section class="panel metric"><span>${title}</span>${value(amount)}</section>`).join('')}</div>`;
 }
 
-function savings(book) {
+function savingSnapshot(book) {
   const date=today();
   const byPlan=new Map();
   for (const deposit of book.savingDeposits) {
@@ -353,6 +360,14 @@ function savings(book) {
   const plans=book.savings.map(plan=>{
     const result=savingTotals(plan,byPlan.get(plan.id) ?? [],date);
     for (const key of Object.keys(total)) total[key]+=result[key];
+    return {plan,result};
+  });
+  return {date,total,plans};
+}
+
+function savings(book) {
+  const {date,total,plans}=savingSnapshot(book);
+  const rows=plans.map(({plan,result})=>{
     const status=plan.start>date?'未开始':plan.end && plan.end<date?'已结束':'进行中';
     return `<div class="manage-row saving-row">
       <div><h3>${esc(plan.name)}</h3><p>${status} · 每日 ${money(plan.daily)}</p><p>已存 ${money(result.actual)} · 待存 ${money(result.pending)}</p></div>
@@ -361,7 +376,7 @@ function savings(book) {
   return header('定期存款','按天累计应存和待存',button('新增计划','saving','primary'))+
     `<section class="balance-card saving-total"><div class="balance-title">存款总量（累计实存）</div><div class="balance-value number">${money(total.actual)}</div></section>`+
     savingSummary(total)+`<section class="panel section-gap">${panelHead('存款计划')}
-      ${plans||empty('wallet','还没有存款计划','设置每日金额和开始日期，账本就会自动累计应存。')}</section>`;
+      ${rows||empty('wallet','还没有存款计划','设置每日金额和开始日期，账本就会自动累计应存。')}</section>`;
 }
 
 function savingDetail(book,ui) {

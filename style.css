@@ -176,7 +176,7 @@ details.group section { padding:0 0 10px 16px; }
 .report-month { width:100%; min-height:30px; white-space:nowrap; }
 .report-metric { text-align:left; }
 .report-metric span { display:flex; align-items:center; justify-content:space-between; }
-.report-metric .icon,.category-line .icon,.saving-shortcut .icon { width:16px; height:16px; color:var(--muted); }
+.report-metric .icon,.category-line .icon { width:16px; height:16px; color:var(--muted); }
 .report-metric:hover,.category-line:is(button):hover,.report-month:hover { background:var(--soft); }
 .legend { display:flex; gap:13px; flex-wrap:wrap; color:var(--muted); font-size:.84rem; margin-top:11px; }
 .legend span { display:inline-flex; align-items:center; gap:5px; }
@@ -263,6 +263,16 @@ dialog.batch-dialog { width:min(100% - 28px,660px); overflow:hidden; max-height:
 .debt-note { overflow-wrap:anywhere; }
 .reminder-card { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--soft); }
 .reminder-card .button { flex:none; }
+.saving-entry { display:flex; align-items:center; gap:12px; min-width:0; min-height:66px; margin-bottom:12px; padding:10px 13px; border:1px solid #cadfbe; border-radius:16px; background:#eef6e4; color:#1c452d; }
+.saving-entry:hover,.saving-entry:focus-visible { background:#e4f1d8; }
+.saving-entry-icon { display:grid; place-items:center; width:38px; height:38px; flex:none; border-radius:11px; background:#d7ebc3; }
+.saving-entry-icon .icon { width:21px; height:21px; }
+.saving-entry-title,.saving-entry-pending { display:grid; gap:3px; min-width:0; overflow-wrap:anywhere; }
+.saving-entry-title { flex:1; }
+.saving-entry-title strong { font-size:1.05rem; }
+.saving-entry small { font-size:.8rem; color:#456450; }
+.saving-entry-pending { text-align:right; }
+.saving-entry > .icon { width:19px; height:19px; flex:none; }
 .saving-total { min-height:0; margin-bottom:12px; }
 .saving-total .balance-value { margin-bottom:0; }
 .saving-metrics .number,.saving-row p { overflow-wrap:anywhere; }
