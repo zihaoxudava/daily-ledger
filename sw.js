@@ -1,13 +1,14 @@
 'use strict';
 
 const prefix = 'daily-ledger-shell-';
-const cacheName = prefix + '1.6.7';
+const cacheName = prefix + '1.7.0';
 const base = new URL(self.registration.scope);
 const assets = [
   ['./','text/html'], ['./style.css','text/css'], ['./app.js','javascript'],
   ['./catalog.js','javascript'], ['./store.js','javascript'], ['./schedule.js','javascript'],
   ['./files.js','javascript'], ['./views.js','javascript'], ['./releases.js','javascript'], ['./manifest.webmanifest','json'],
   ['./attachments.js','javascript'], ['./note.js','javascript'], ['./native.js','javascript'],
+  ['./archive.js','javascript'], ['./statements.js','javascript'], ['./vendor/zip.min.js','javascript'],
   ['./apple-touch-icon.png','image/png'], ['./icon-192.png','image/png'], ['./icon-512.png','image/png'],
   ['./guide/','text/html'],
 ].map(([path,type]) => [new URL(path,base).href,type]);

@@ -41,6 +41,11 @@
       <button class="button primary" type="button" data-action="backup">立即备份</button>
     </aside>
   </div>
+  <div class="update-notice" id="backup-progress" hidden>
+    <span id="backup-progress-label" role="status">正在读取账本</span>
+    <progress aria-label="备份进度" max="100"></progress>
+    <button class="button secondary" type="button" data-action="confirm-backup" hidden>文件已保存</button>
+  </div>
   <main id="content" class="workspace" aria-busy="true">
     <section class="panel system-message"><h1>正在打开账本…</h1><p>请稍候。</p></section>
   </main>

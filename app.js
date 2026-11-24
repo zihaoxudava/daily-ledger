@@ -1,14 +1,16 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
-import { today, shiftMonth, uid, money, parseMoney, readBook as readRoot, readBackup, writeBook as writeRoot, applyRecurring, hasDueRecurring, validate,
+import { today, shiftMonth, uid, money, parseMoney, readBook as readRoot, withBackupReader, restoreBook, readRestoreUndo, undoRestore, writeBook as writeRoot, applyRecurring, hasDueRecurring, validate,
   validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf,
   initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, wallpaperFor,
   defaultWallpaperTransparency, defaultDailyCheckInTimes, validDailyCheckInTimes, readAttachment, MAX_AMOUNT } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
-import { buildBackup, restoreAttachmentFiles, attachmentFromFile } from './attachments.js';
+import { attachmentFromFile } from './attachments.js';
+import { ledgerOnly, compareRestore, writeBackupZip, readBackupFile } from './archive.js';
+import { readStatement, reviewStatement, applyStatement } from './statements.js';
 import { noteFields, noteDraft, mountNote, readNote } from './note.js';
-import { android, pendingPayments, acknowledgePayments } from './native.js';
+import { android, pendingPayments, acknowledgePayments, saveNativeArchive } from './native.js';
 import { pages, nav, navSection, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
   categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth, wallpaperPageNames } from './views.js';
 
@@ -79,6 +81,7 @@ async function writeBook(change,files) {
   },files));
 }
 let pendingRefresh=0, refreshing=false;
+let exportingBackup=false;
 let runningActions=0, pickingFile=false, updateScroll;
 let lastSavingsDate;
 try {
@@ -1166,6 +1169,82 @@ function must(condition,message) {
   if (!condition) throw new Error(message);
 }
 
+function reportBackupProgress(done,total) {
+  const badge=$('#backup-progress');
+  const progress=badge.querySelector('progress');
+  const percent=Math.round(done/total*100);
+  if (progress.value===percent && progress.hasAttribute('value')) return;
+  progress.value=percent;
+  $('#backup-progress-label').textContent=`正在打包 · ${percent}%`;
+}
+
+async function exportCompleteBackup() {
+  if (exportingBackup) return;
+  requestPersistence();
+  exportingBackup=true;
+  const badge=$('#backup-progress');
+  badge.hidden=false;
+  const progress=badge.querySelector('progress');
+  const confirm=badge.querySelector('button');
+  progress.hidden=false;
+  progress.removeAttribute('value');
+  confirm.hidden=true;
+  $('#backup-progress-label').textContent='正在读取账本与附件';
+  const name=`日常账本-完整备份-${today()}.zip`;
+  try {
+    await withBackupReader(async(current,read)=>{
+      const pack=output=>writeBackupZip(current,read,reportBackupProgress,output);
+      if (android) await saveNativeArchive(name,pack);
+      else await download(name,await pack());
+    });
+    if (!android) {
+      progress.hidden=true;
+      $('#backup-progress-label').textContent='确认完整备份已保存';
+      confirm.hidden=false;
+    }
+  } finally {
+    if (confirm.hidden) badge.hidden=true;
+    exportingBackup=false;
+  }
+}
+
+function showRestorePreview(next,state) {
+  const {added,overwritten,removed,ledgers,attachments}=compareRestore(ui.root,next);
+  modalFrame({...state,expected:JSON.stringify(ui.root)},state.kind==='undo-restore'?'撤销上次恢复':'预览恢复结果',
+    `${state.name?`<p>${esc(state.name)}</p>`:''}
+    <div class="field-row"><p><strong>新增 ${added} 笔</strong></p><p><strong>同编号覆盖 ${overwritten} 笔</strong></p>
+    <p><strong>移除 ${removed} 笔</strong></p><p>恢复后 ${ledgers} 个账本</p></div>
+    <p>恢复后会使用这份备份里的账户、分类、借款、预算和 ${attachments} 个附件。当前内容会保留为一份可撤销的快照。</p>`,
+    cancel+submit(state.kind==='undo-restore'?'确认撤销':'替换并恢复'));
+}
+
+function showStatementPreview(statement,name) {
+  const review=reviewStatement(book,statement);
+  const preferred=book.accounts.find(item=>item.id===statement.provider && !item.archived)?.id;
+  const state={kind:'statement',statement,review,offset:0,ledgerId:ui.ledgerId};
+  modalFrame(state,`核对${statement.label}账单`,
+    `<p>${esc(name)}</p><p>待补记录 ${review.fresh.length} 笔 · 疑似重复 ${review.possible.length} 笔 · 同一订单 ${review.duplicates} 笔</p>
+    ${label('导入到当前账本的账户',`<select name="account" required>${accountOptions(book,preferred)}</select>`)}
+    ${review.fresh.length?`<p>待补记录示例：${review.fresh.slice(0,3).map(row=>`${esc(row.date)} ${money(row.amount)} ${esc(row.note.slice(0,24))}`).join('；')}</p>`:''}
+    ${review.possible.length?'<p>金额、日期和收支方向相同的流水留作核对。勾选后才会导入。</p><div id="statement-review"></div><button class="button neutral" type="button" data-action="more-statement">继续查看待核对</button>':''}
+    ${statement.skipped.length?`<details><summary>未纳入 ${statement.skipped.length} 笔</summary>
+      <p class="muted">包括未完成支付、无法核对收支的退款或资金划转。</p>
+      <ul>${statement.skipped.slice(0,40).map(row=>`<li>${esc(row.date)} · ${esc(row.description.slice(0,40))} · ${esc(row.reason)}</li>`).join('')}</ul></details>`:''}`,
+    cancel+submit('确认导入'));
+  showMoreStatementReview();
+}
+
+function showMoreStatementReview() {
+  const list=$('#statement-review');
+  if (!list || modal.kind!=='statement') return;
+  const rows=modal.review.possible.slice(modal.offset,modal.offset+40);
+  list.insertAdjacentHTML('beforeend',rows.map(row=>`<label class="option-check">
+    <input type="checkbox" name="possible" value="${row.index}">
+    <span>${esc(row.date)} ${esc(row.time)} · ${money(row.amount)} · ${esc(row.note || types[row.type])}</span></label>`).join(''));
+  modal.offset+=rows.length;
+  dialog.querySelector('[data-action=more-statement]').hidden=modal.offset>=modal.review.possible.length;
+}
+
 async function commit(change, message, afterWrite, files, global=false) {
   if (global) useRoot(await writeRoot(change,files));
   else await writeBook(change,files);
@@ -1219,7 +1298,9 @@ function optionalTime(get) {
 const save = {
   entry(current,s,get,note) {
     const item=makeEntry(current,s.type,get,get('date'),note,s.id);
-    if (s.id) must(current.entries.some(e=>e.id===s.id),'这笔账目已在其他窗口移除。');
+    const existing=s.id?current.entries.find(entry=>entry.id===s.id):null;
+    if (s.id) must(existing,'这笔账目已在其他窗口移除。');
+    if (existing?.statement) item.statement=existing.statement;
     upsert(current.entries,item);
   },
   debt(current,s,get,note) {
@@ -1349,8 +1430,20 @@ async function submitModal(event) {
         owner[state.collection]=owner[state.collection].filter(item=>item.id!==state.id);
         if (state.collection==='savings') current.savingDeposits=current.savingDeposits.filter(item=>item.plan!==state.id);
       },'已删除');
-    } else if (state.kind==='restore') {
-      await commit(()=>state.data,'已恢复完整备份',()=>selectLedger('main'),state.files,true);
+    } else if (state.kind==='restore' || state.kind==='undo-restore') {
+      useRoot(state.kind==='restore'?await restoreBook(state.data,state.files,state.expected):
+        await undoRestore(state.id,state.expected));
+      selectLedger('main','files');
+      channel?.postMessage('change');
+      closeModal();
+      tell(state.kind==='restore'?'恢复完成，可撤销这次恢复':'已撤销恢复',true);
+    } else if (state.kind==='statement') {
+      must(state.ledgerId===ui.ledgerId,'当前账本已切换，请重新选择文件。');
+      let summary;
+      await commit(current=>{
+        summary=applyStatement(current,state.statement,new Set(data.getAll('possible').map(String)),get('account'));
+      });
+      tell(`已导入 ${summary.added} 笔，跳过 ${summary.skipped} 笔`,true);
     } else if (state.kind==='ledger') {
       const name=get('name');
       must(name,'请填写账本名称。');
@@ -1463,7 +1556,8 @@ async function submitModal(event) {
 function chooseFile(mode) {
   pickingFile=true;
   fileMode=mode;
-  fileInput.accept=mode==='csv'?'.csv,text/csv':'.json,application/json';
+  fileInput.accept=mode==='csv'?'.csv,text/csv':mode==='statement'?'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+    '.zip,.json,application/zip,application/json';
   fileInput.value='';
   fileInput.click();
 }
@@ -1473,25 +1567,29 @@ async function inspectFile() {
   if (!file || !book) return;
   try {
     if (fileMode==='csv' && file.size>25_000_000) throw new Error('文件超过 25 MB，请分批导入 CSV。');
-    const raw=await file.text();
     if (fileMode==='csv') {
+      const raw=await file.text();
+      if (dialog.open) { tell('请先完成当前编辑，再选择导入文件。'); return; }
       const preview=structuredClone(book);
       const {added,skipped}=importCSV(preview,raw);
       validate(preview);
       modalFrame({kind:'csv',raw},'确认导入 CSV',`<p>${esc(file.name)}</p><p>将新增 ${added} 笔，跳过 ${skipped} 笔已有编号的记录。文件中出现的新账户和分类会自动建立。</p>`,cancel+submit('导入'));
+    } else if (fileMode==='statement') {
+      const statement=await readStatement(file);
+      if (dialog.open) { tell('请先完成当前编辑，再选择导入文件。'); return; }
+      showStatementPreview(statement,file.name);
     } else {
-      let parsed;
-      try { parsed=JSON.parse(raw); }
-      catch { throw new Error('文件不是有效的 JSON 备份。'); }
-      const {attachmentFiles,...contents}=parsed ?? {};
-      const data=validate(contents);
-      const files=restoreAttachmentFiles(data,attachmentFiles);
-      modalFrame({kind:'restore',data,files},'确认恢复备份',`<p>${esc(file.name)}</p>
-        <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户、${data.budgets.length} 项预算${data.savings.length?`、${data.savings.length} 项存款计划`:''}${files.size?`和 ${files.size} 个附件`:''}。</p>
-        <p>恢复会替换本机所有账本、附件和背景。本文件含 ${data.ledgers?.length ?? 0} 个独立账本。请先备份现有账目。</p>`,cancel+submit('替换并恢复'));
+      const {book:data,files,close}=await readBackupFile(file);
+      if (dialog.open) {
+        await close?.();
+        tell('请先完成当前编辑，再选择备份。');
+        return;
+      }
+      showRestorePreview(data,{kind:'restore',data,files,close,name:file.name});
     }
   } catch (error) {
-    modalFrame({kind:'info'},'文件读取失败',`<p class="error">${esc(showError(error))}</p>`,submit('关闭'));
+    if (dialog.open) tell(showError(error));
+    else modalFrame({kind:'info'},'文件读取失败',`<p class="error">${esc(showError(error))}</p>`,submit('关闭'));
   }
 }
 
@@ -1657,20 +1755,17 @@ const actions = {
   'check-update':manualCheckUpdate,
   'install-app':installApp,
   'pick-csv':()=>chooseFile('csv'),
+  'pick-statement':()=>chooseFile('statement'),
+  'more-statement':showMoreStatementReview,
   'pick-backup':()=>chooseFile('backup'),
   'csv-template':()=>download('日常账本-导入模板.csv',csvTemplate(),'text/csv;charset=utf-8'),
-  backup:async(_id,button)=>{
-    requestPersistence();
-    button.disabled=true;
-    try {
-      const {book,files}=await readBackup();
-      if (files.size) tell('正在打包账目与附件…');
-      await download(`日常账本-备份-${today()}.json`,await buildBackup(book,files));
-      if (!android) {
-        markBackup();
-        tell('备份下载已发起');
-      }
-    } finally { button.disabled=false; }
+  backup:exportCompleteBackup,
+  'backup-ledger':async()=>download(`日常账本-账目备份-${today()}.json`,ledgerOnly(await readRoot())),
+  'confirm-backup':()=>{ markBackup(); $('#backup-progress').hidden=true; tell('已确认备份保存',true); },
+  'undo-restore':async()=>{
+    const previous=await readRestoreUndo();
+    if (!previous) { tell('暂时没有可撤销的恢复记录。'); return; }
+    showRestorePreview(previous.book,{kind:'undo-restore',id:previous.id});
   },
   export:()=>download(`日常账本-全量-${today()}.csv`,exportCSV(book),'text/csv;charset=utf-8'),
   'export-filter':()=>download(`日常账本-筛选-${today()}.csv`,exportCSV(book,filtered(book,ui)),'text/csv;charset=utf-8'),
@@ -1787,6 +1882,7 @@ dialog.addEventListener('cancel',event=>{
 dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal?.kind!=='batch') closeModal(); });
 dialog.addEventListener('close',()=>{
   if (!dialog.open) {
+    if (modal?.kind==='restore') modal.close?.();
     if (modal?.kind==='wallpaper') clearWallpaperPreview();
     if (modal?.kind==='notification-intro') markNotificationIntroSeen();
     modal=undefined;

@@ -28,7 +28,7 @@ $dex = Join-Path $WorkDir 'dex'
 $resources = Join-Path $WorkDir 'res'
 New-Item -ItemType Directory -Force $www,$classes,$dex,(Join-Path $resources 'drawable-nodpi') | Out-Null
 $siteFiles = 'index.html','app.js','attachments.js','catalog.js','files.js','native.js','note.js',
-    'releases.js','schedule.js','store.js','style.css','views.js','manifest.webmanifest',
+    'releases.js','schedule.js','store.js','style.css','views.js','manifest.webmanifest','archive.js','statements.js','vendor',
     'icon-192.png','icon-512.png','apple-touch-icon.png','guide'
 foreach ($file in $siteFiles) {
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $www -Recurse -Force

@@ -8,26 +8,36 @@ function result(reply) {
 }
 
 export const readNativeBook = () => result(android.readBook());
+export const readNativeUndo = () => result(android.readRestoreUndo());
+export const undoNativeRestore = (id,nextId,current) => result(android.undoRestore(id,nextId,JSON.stringify(current)));
 export const pendingPayments = () => android?.pendingPayments ? result(android.pendingPayments()) : [];
 export const acknowledgePayments = ids => result(android.ackPayments(JSON.stringify(ids)));
 
 async function stageFile(token,id,file) {
   for (let start=0;start<file.size;start+=192*1024) {
-    const bytes=new Uint8Array(await file.slice(start,start+192*1024).arrayBuffer());
+    appendBytes(token,id,new Uint8Array(await file.slice(start,start+192*1024).arrayBuffer()));
+  }
+}
+
+function appendBytes(token,id,bytes) {
+  for (let start=0;start<bytes.length;start+=192*1024) {
+    const chunk=bytes.subarray(start,start+192*1024);
     let text='';
-    for (let i=0;i<bytes.length;i+=8192) text+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    for (let i=0;i<chunk.length;i+=8192) text+=String.fromCharCode(...chunk.subarray(i,i+8192));
     result(android.append(token,id,btoa(text)));
   }
 }
 
-export async function writeNativeBook(book,index,files) {
+export async function writeNativeBook(book,index,files,snapshot) {
   const token=result(android.begin());
   try {
-    for (const [id,blob] of files) {
+    for await (const [id,blob] of files) {
       if (index.has(id)) await stageFile(token,id,new Blob([blob]));
     }
     const sizes=Object.fromEntries([...index].map(([id,item])=>[id,item.size]));
-    result(android.commit(token,JSON.stringify(book),JSON.stringify(sizes)));
+    const body=JSON.stringify(book), manifest=JSON.stringify(sizes);
+    if (snapshot) result(android.commitRestore(token,body,manifest,snapshot.id,JSON.stringify(snapshot.book)));
+    else result(android.commit(token,body,manifest));
   } finally { android.discard(token); }
 }
 
@@ -44,6 +54,17 @@ export async function saveNativeDownload(name,file) {
   try {
     await stageFile(token,'download',file);
     result(android.exportFile(token,name,file.type));
+  } catch (error) {
+    android.discard(token);
+    throw error;
+  }
+}
+
+export async function saveNativeArchive(name,write) {
+  const token=result(android.begin());
+  try {
+    await write(new WritableStream({write:bytes=>appendBytes(token,'download',bytes)}));
+    result(android.exportFile(token,name,'application/zip'));
   } catch (error) {
     android.discard(token);
     throw error;

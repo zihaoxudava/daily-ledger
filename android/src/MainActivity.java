@@ -310,6 +310,13 @@ public final class MainActivity extends Activity {
                 return true;
             });
         }
+        @JavascriptInterface public String readRestoreUndo() { return answer(storage::undoSummary); }
+        @JavascriptInterface public String commitRestore(String token,String book,String sizes,String id,String current) {
+            return answer(()->{ storage.commit(token,book,sizes,id,current); syncReminders(); return true; });
+        }
+        @JavascriptInterface public String undoRestore(String id,String nextId,String current) {
+            return answer(()->{ storage.undoRestore(id,nextId,current); syncReminders(); return true; });
+        }
         @JavascriptInterface public void discard(String token) { storage.discard(token); }
         @JavascriptInterface public int versionCode() {
             try { return getPackageManager().getPackageInfo(getPackageName(),0).versionCode; }
@@ -353,7 +360,7 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     exportToken=token;
-                    exportingBackup="application/json".equals(mime) && name.startsWith("日常账本-备份-");
+                    exportingBackup="application/zip".equals(mime) && name.startsWith("日常账本-完整备份-");
                     try {
                         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                             .setType(mime.contains("/")?mime:"application/octet-stream").putExtra(Intent.EXTRA_TITLE,name);

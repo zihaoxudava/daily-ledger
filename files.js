@@ -22,7 +22,7 @@ export function exportCSV(book, entries = book.entries) {
 
 export const csvTemplate = () => '\uFEFF' + headers.join(',') + '\r\n';
 
-function parseCSV(raw) {
+export function parseCSV(raw,allowPadding=false) {
   const input = raw.replace(/^\uFEFF/, '');
   const rows = [];
   let row = [], cell = '', quoted = false, closed = false;
@@ -41,6 +41,8 @@ function parseCSV(raw) {
     } else if (char === '\n' || char === '\r') {
       if (char === '\r' && input[index+1] === '\n') index++;
       nextRow();
+    } else if (closed && allowPadding && /[ \t]/.test(char)) {
+      continue;
     } else if (closed || char === '"') {
       throw new Error('CSV 引号或分隔符有误。请使用 UTF-8 逗号分隔格式。');
     } else {

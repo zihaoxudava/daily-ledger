@@ -12,13 +12,14 @@
 - 多账户、期初余额、分类和二级分类，记账时可直接添加分类
 - 独立记录借出、借入和分次还款，单独统计待收回和待归还金额
 - 按周、月、年重复的账单与分期
-- 备注可加照片和文件，CSV 导入导出流水，JSON 备份和恢复账本及附件
+- 备注可加照片和文件。支持 CSV 导入导出，以及微信和支付宝原始账单对账
+- 完整 ZIP 备份、仅账目 JSON、旧版 JSON 恢复，以及一次恢复撤销
 - 独立账本，各自管理流水、账户、分类和预算
 - 各页面可设置独立壁纸，支持图片、动图或静音视频
 - Android 版可在授权后识别微信与支付宝付款通知
 - 首页每 30 天提醒导出完整备份
 
-网页账目保存在浏览器或主屏幕 App 的 IndexedDB 中。Android 安装版使用应用私有目录存储。跨设备、跨网址或迁入安装版时，先导出完整 JSON，再恢复到目标账本。
+网页账目保存在浏览器或主屏幕 App 的 IndexedDB 中。Android 安装版使用应用私有目录存储。跨设备、跨网址或迁入安装版时，先导出完整 ZIP，再恢复到目标账本。
 
 ## 本地运行
 
@@ -41,3 +42,5 @@ Android 安装版的构建和升级步骤见 [Android 构建说明](android/READ
 ## 许可证
 
 项目使用 MIT 许可证。周期日期计算改编自 [Moniflow](https://github.com/choieunsoh/moniflow)，原作者和许可证见应用目录中的 `THIRD-PARTY.txt`。
+
+ZIP 读写使用 [zip.js 2.25.0](https://github.com/gildas-lormeau/zip.js)，采用 BSD-3-Clause，许可证见 `vendor/zip.LICENSE.txt`。

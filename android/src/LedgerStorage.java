@@ -92,7 +92,29 @@ final class LedgerStorage {
         return new FileInputStream(new File(attachments,name));
     }
 
+    synchronized JSONObject undoSummary() throws Exception {
+        JSONObject undo=state().optJSONObject("undo");
+        return undo==null ? null : new JSONObject().put("id",undo.getString("id")).put("book",undo.getJSONObject("book"));
+    }
+
+    private JSONObject snapshot(String id, JSONObject book) throws Exception {
+        return new JSONObject().put("id",id).put("book",book).put("paths",state().getJSONObject("paths"));
+    }
+
+    synchronized void undoRestore(String expected, String newId, String current) throws Exception {
+        JSONObject previous=state().optJSONObject("undo");
+        if (previous==null || !expected.equals(previous.getString("id"))) throw new IOException("恢复记录已变化，请重新查看。");
+        JSONObject next=new JSONObject().put("book",previous.getJSONObject("book"))
+            .put("paths",previous.getJSONObject("paths")).put("undo",snapshot(newId,new JSONObject(current)));
+        persist(next);
+        cleanAttachments(next);
+    }
+
     synchronized void commit(String token, String body, String fileSizes) throws Exception {
+        commit(token,body,fileSizes,null,null);
+    }
+
+    synchronized void commit(String token, String body, String fileSizes,String undoId,String current) throws Exception {
         checkToken(token);
         JSONObject nextBook = new JSONObject(body);
         JSONObject sizes = new JSONObject(fileSizes);
@@ -122,22 +144,37 @@ final class LedgerStorage {
                 if (!file.isFile() || file.length()!=size) throw new IOException("找不到完整附件，请重新添加。");
                 paths.put(id,name);
             }
-            JSONObject next=new JSONObject().put("book",nextBook).put("paths",paths);
-            FileOutputStream out=ledger.startWrite();
-            try {
-                out.write(next.toString().getBytes(StandardCharsets.UTF_8));
-                ledger.finishWrite(out);
-            } catch (Exception error) {
-                ledger.failWrite(out);
-                throw error;
-            }
-            loaded=next;
+            JSONObject undo=undoId==null ? state().optJSONObject("undo") : snapshot(undoId,new JSONObject(current));
+            JSONObject next=new JSONObject().put("book",nextBook).put("paths",paths).put("undo",undo);
+            persist(next);
         } catch (Exception error) {
             for (String name:promoted) new File(attachments,name).delete();
             throw error;
         }
-        Set<String> keep=new HashSet<>();
+        cleanAttachments(loaded);
+    }
+
+    private void persist(JSONObject next) throws Exception {
+        FileOutputStream out=ledger.startWrite();
+        try {
+            out.write(next.toString().getBytes(StandardCharsets.UTF_8));
+            ledger.finishWrite(out);
+        } catch (Exception error) {
+            ledger.failWrite(out);
+            throw error;
+        }
+        loaded=next;
+    }
+
+    private static void keepPaths(JSONObject paths, Set<String> keep) {
         for (Iterator<String> keys=paths.keys(); keys.hasNext();) keep.add(paths.optString(keys.next()));
+    }
+
+    private void cleanAttachments(JSONObject next) throws Exception {
+        Set<String> keep=new HashSet<>();
+        keepPaths(next.getJSONObject("paths"),keep);
+        JSONObject undo=next.optJSONObject("undo");
+        if (undo!=null) keepPaths(undo.getJSONObject("paths"),keep);
         File[] files=attachments.listFiles();
         if (files!=null) for (File file:files) {
             if (file.isFile() && !keep.contains(file.getName())) file.delete();

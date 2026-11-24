@@ -1,6 +1,6 @@
 # 日常账本 Android 安装版
 
-支持 Android 8 及以上。界面文件随 APK 打包，由 Android System WebView 在 App 内渲染。账本和附件使用 Android 应用私有目录。Android 版和网页使用同一个完整 JSON 备份格式。
+支持 Android 8 及以上。界面文件随 APK 打包，由 Android System WebView 在 App 内渲染。账本和附件使用 Android 应用私有目录。Android 版和网页使用同一个完整 ZIP 备份格式，均可恢复旧版 JSON。
 
 联网打开或回到 App 时会读取 GitHub Pages 的 `downloads/android.json`。若发现更高的版本号，用户可从顶部查看改动并下载 APK，通过系统界面确认覆盖安装。
 

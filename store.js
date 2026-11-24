@@ -1,12 +1,14 @@
 import { defaultGroups, defaultCategories, defaultAccounts, debtDirections, accountTypes, frequencies, tobaccoCategory } from './catalog.js';
 import { occurrence } from './schedule.js';
 import { attachmentIndex, requireAttachment } from './attachments.js';
-import { android, readNativeBook, writeNativeBook, readNativeAttachment } from './native.js';
+import { android, readNativeBook, writeNativeBook, readNativeAttachment, readNativeUndo, undoNativeRestore } from './native.js';
 
 export const MAX_AMOUNT = 9_999_999_999;
 const DB = 'daily-ledger';
 const STORE = 'book';
 const KEY = 'ledger';
+const PATHS = 'attachment-paths';
+const UNDO = 'restore-undo';
 const attachmentKey = id => `attachment:${id}`;
 const MAX_CATEGORIES = 2000;
 let opening;
@@ -196,6 +198,8 @@ function validateLedger(book) {
   const matches = (cat, type) => categories.has(cat) && groups.get(categories.get(cat).group).type === (type === 'income' ? 'income' : 'expense');
   if (!book.accounts.some(acc => !acc.archived) || !groups.size) throw new Error('备份需要至少一个使用中的账户和分类组。');
   indexList(book.entries, entry => validAmount(entry.amount) && validDate(entry.date) && validTime(entry.time) && accounts.has(entry.account) && validText(entry.note,160,true) &&
+    (entry.statement===undefined || (entry.statement && ['wechat','alipay'].includes(entry.statement.provider) &&
+      ['expense','income','refund'].includes(entry.statement.flow) && validText(entry.statement.reference,160,true))) &&
     (entry.type === 'transfer' ? accounts.has(entry.to) && entry.to !== entry.account && entry.category === '' :
       ['expense','income','refund'].includes(entry.type) && matches(entry.category, entry.type) && entry.to === ''),
   60000);
@@ -230,14 +234,17 @@ function validateLedger(book) {
 function connect() {
   if (!opening) {
     opening = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB, 1);
-      request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+      const request = indexedDB.open(DB, 2);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(STORE)) request.result.createObjectStore(STORE);
+      };
       request.onsuccess = () => {
         request.result.onversionchange = () => {
           request.result.close();
           opening = undefined;
         };
         resolve(request.result);
+        reclaimAbandonedAssets(request.result);
       };
       request.onerror = () => reject(request.error);
       request.onblocked = () => reject(new Error('请关闭其他打开的日常账本页面后重试。'));
@@ -260,12 +267,16 @@ export async function readAttachment(item) {
   if (android) return readNativeAttachment(item);
   const database=await connect();
   return new Promise((resolve,reject)=>{
-    const request=database.transaction(STORE).objectStore(STORE).get(attachmentKey(item.id));
-    request.onsuccess=()=>{
-      try { resolve(new Blob([requireAttachment(request.result,item)],{type:item.type})); }
-      catch (error) { reject(error); }
-    };
-    request.onerror=()=>reject(request.error);
+    const transaction=database.transaction(STORE);
+    const store=transaction.objectStore(STORE);
+    readKeys(store,[PATHS],paths=>{
+      const request=store.get(pathFor(paths,item.id));
+      request.onsuccess=()=>{
+        try { resolve(new Blob([requireAttachment(request.result,item)],{type:item.type})); }
+        catch (error) { reject(error); }
+      };
+    });
+    transaction.onabort=()=>reject(transaction.error);
   });
 }
 
@@ -284,25 +295,104 @@ export async function readBackup() {
   return new Promise((resolve,reject)=>{
     const transaction=database.transaction(STORE);
     const store=transaction.objectStore(STORE);
-    const request=store.get(KEY);
     const files=new Map();
     let book;
     let error;
-    request.onsuccess=()=>{
+    readKeys(store,[KEY,PATHS],(stored,paths)=>{
       try {
-        book=withDefaults(request.result ?? initial());
+        book=withDefaults(stored ?? initial());
         for (const [id,item] of attachmentIndex(book)) {
-          const attachment=store.get(attachmentKey(id));
+          const attachment=store.get(pathFor(paths,id));
           attachment.onsuccess=()=>{
             try { files.set(id,new Blob([requireAttachment(attachment.result,item)],{type:item.type})); }
             catch (cause) { error=cause; transaction.abort(); }
           };
         }
       } catch (cause) { error=cause; transaction.abort(); }
-    };
+    });
     transaction.oncomplete=()=>resolve({book,files});
     transaction.onabort=()=>reject(error ?? transaction.error ?? new Error('读取备份中断，请重试。'));
   });
+}
+
+export async function withBackupReader(run) {
+  if (!android) {
+    const {book,files}=await readBackup();
+    return run(book,item=>files.get(item.id));
+  }
+  const operation=nativeWrite.then(async()=>run(await readBook(),readNativeAttachment));
+  nativeWrite=operation.catch(()=>{});
+  return operation;
+}
+
+const pathFor=(paths,id)=>paths && Object.hasOwn(paths,id)?paths[id]:attachmentKey(id);
+function readKeys(store,keys,read) {
+  const values=[];
+  let pending=keys.length;
+  keys.forEach((key,index)=>{
+    const request=store.get(key);
+    request.onsuccess=()=>{
+      values[index]=request.result;
+      if (!--pending) read(...values);
+    };
+  });
+}
+
+function reclaimAbandonedAssets(database) {
+  const store=database.transaction(STORE,'readwrite').objectStore(STORE);
+  const cutoff=Date.now()-86_400_000;
+  readKeys(store,[PATHS,UNDO],(paths,undo)=>{
+    const live=new Set([...Object.values(paths ?? {}),...Object.values(undo?.paths ?? {})]);
+    const request=store.openKeyCursor(IDBKeyRange.bound('asset:',`asset:${cutoff}:`));
+    request.onsuccess=()=>{
+      const cursor=request.result;
+      if (!cursor) return;
+      if (!live.has(cursor.primaryKey)) store.delete(cursor.primaryKey);
+      cursor.continue();
+    };
+  });
+}
+
+export async function readRestoreUndo() {
+  if (android) return readNativeUndo();
+  const database=await connect();
+  return new Promise((resolve,reject)=>{
+    const request=database.transaction(STORE).objectStore(STORE).get(UNDO);
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error);
+  });
+}
+
+const checkRestoreBase=(current,expected)=>{
+  if (expected!==undefined && JSON.stringify(current)!==expected) throw new Error('本机账本在预览后有改动，请重新核对。');
+};
+
+export async function restoreBook(next,files,expected) {
+  if (android) {
+    const write=nativeWrite.then(async()=>{
+      const current=await readBook();
+      checkRestoreBase(current,expected);
+      await writeNativeBook(next,attachmentIndex(next),files,{book:current,id:uid()});
+      return next;
+    });
+    nativeWrite=write.catch(()=>{});
+    return write;
+  }
+  return writeWebBook(()=>next,files,{expected,restore:true});
+}
+
+export async function undoRestore(id,expected) {
+  if (android) {
+    const write=nativeWrite.then(async()=>{
+      const current=await readBook();
+      checkRestoreBase(current,expected);
+      undoNativeRestore(id,uid(),current);
+      return readBook();
+    });
+    nativeWrite=write.catch(()=>{});
+    return write;
+  }
+  return writeWebBook(null,new Map(),{id,expected,restore:true});
 }
 
 export async function writeBook(change,files=new Map()) {
@@ -316,39 +406,91 @@ export async function writeBook(change,files=new Map()) {
     nativeWrite=write.catch(()=>{});
     return write;
   }
-  const buffers=new Map();
-  for (const [id,file] of files) buffers.set(id,file instanceof Blob ? await file.arrayBuffer() : file);
-  const database = await connect();
+  return writeWebBook(change,files);
+}
+
+const webWriteError=cause=>cause?.name==='QuotaExceededError'?
+  new Error('本机空间不足，请释放存储后重试。'):cause ?? new Error('保存中断，请重试。');
+
+function writeFiles(database,write) {
+  return new Promise((resolve,reject)=>{
+    const transaction=database.transaction(STORE,'readwrite');
+    write(transaction.objectStore(STORE));
+    transaction.oncomplete=resolve;
+    transaction.onabort=()=>reject(webWriteError(transaction.error));
+  });
+}
+
+async function writeWebBook(change,files,mode={}) {
+  const database=await connect();
+  const staged=new Map();
+  const stagingToken=`asset:${Date.now()}:${uid()}:`;
+  try {
+    for await (const [id,file] of files) {
+      const buffer=file instanceof Blob?await file.arrayBuffer():file;
+      let item=staged.get(id);
+      if (!item) {
+        item={key:stagingToken+staged.size,size:buffer.byteLength};
+        staged.set(id,item);
+      }
+      await writeFiles(database,store=>store.put(buffer,item.key));
+    }
+    return await finishWebWrite(database,change,staged,mode);
+  } catch (error) {
+    if (staged.size) await writeFiles(database,store=>{
+      for (const item of staged.values()) store.delete(item.key);
+    }).catch(()=>{});
+    throw error;
+  }
+}
+
+function finishWebWrite(database,change,staged,mode) {
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE,'readwrite');
     const store = transaction.objectStore(STORE);
-    const request = store.get(KEY);
     let result, error;
-    request.onsuccess = () => {
+    readKeys(store,[KEY,PATHS,UNDO],(stored,storedPaths,oldUndo)=>{
       try {
-        const current = withDefaults(request.result ?? initial());
+        const current = withDefaults(stored ?? initial());
+        checkRestoreBase(current,mode.expected);
         const before = attachmentIndex(current);
-        result = validate(change(current) ?? current);
+        const previous=Object.fromEntries([...before.keys()].map(id=>[id,pathFor(storedPaths,id)]));
+        const undo=mode.restore?{id:uid(),book:structuredClone(current),paths:previous}:oldUndo;
+        if (mode.id && mode.id!==oldUndo?.id) throw new Error('恢复记录已变化，请重新查看。');
+        result = validate(mode.id?oldUndo.book:change(current) ?? current);
         const after = attachmentIndex(result);
+        const paths=Object.create(null);
+        const retained=new Set(Object.values(undo?.paths ?? {}));
         for (const [id,item] of after) {
-          if (buffers.has(id) || !before.has(id)) {
-            store.put(requireAttachment(buffers.get(id),item),attachmentKey(id));
+          const source=staged.get(id);
+          const key=mode.id?oldUndo.paths[id]:source ? source.key : !mode.restore && before.has(id)?previous[id]:null;
+          if (!key || (source && source.size!==item.size)) throw new Error(`找不到完整附件「${item.name}」。`);
+          paths[id]=key;
+          retained.add(key);
+          if (source || mode.id) {
+            const check=store.count(key);
+            check.onsuccess=()=>{
+              if (check.result!==1) {
+                error=new Error(`找不到完整附件「${item.name}」。`);
+                transaction.abort();
+              }
+            };
           }
         }
-        for (const id of before.keys()) {
-          if (!after.has(id)) store.delete(attachmentKey(id));
+        for (const key of [...Object.values(previous),...Object.values(oldUndo?.paths ?? {}),...Array.from(staged.values(),item=>item.key)]) {
+          if (!retained.has(key)) store.delete(key);
         }
+        store.put(paths,PATHS);
+        if (mode.restore) store.put(undo,UNDO);
         store.put(result, KEY);
       } catch (cause) {
         error = cause;
         transaction.abort();
       }
-    };
+    });
     transaction.oncomplete = () => resolve(result);
     transaction.onabort = () => {
-      const cause=error ?? transaction.error;
-      reject(cause?.name==='QuotaExceededError' ? new Error('本机空间不足，请移除附件或释放存储后重试。') :
-        cause ?? new Error('保存中断，请重试。'));
+      reject(webWriteError(error ?? transaction.error));
     };
   });
 }

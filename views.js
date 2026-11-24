@@ -467,12 +467,16 @@ function categories(book,ui) {
 }
 function files(book,ui) {
   return header('数据与备份','换机前请先保存一份完整备份')+`
-    <section class="panel">${panelHead('完整备份 · JSON')}
+    <section class="panel">${panelHead('备份与恢复')}
     <p class="muted">完整备份包含主账本、${ui.root.ledgers?.length ?? 0} 个独立账本、附件和页面背景。</p>
-    <div class="actions section-gap">${button('导出完整备份','backup','primary')}${button('恢复备份','pick-backup','neutral')}</div></section>
+    <div class="actions section-gap">${button('导出完整 ZIP','backup','primary')}${button('只备份账目','backup-ledger','neutral')}
+    ${button('恢复备份','pick-backup','neutral')}${button('撤销上次恢复','undo-restore','neutral')}</div></section>
+    <section class="panel section-gap">${panelHead('微信与支付宝对账')}
+    <p class="muted">导入原始 CSV 或 XLSX，在保存前核对缺项和疑似重复。</p>
+    <div class="actions section-gap">${button('导入平台账单','pick-statement','secondary')}</div></section>
     <section class="panel section-gap">${panelHead('当前账本流水 · CSV')}
     <div class="actions">${button('导出全部流水','export','secondary')}${button('下载导入模板','csv-template','neutral')}${button('导入 CSV','pick-csv','neutral')}</div></section>
-    <section class="panel section-gap"><h2>存储位置</h2><p class="muted section-gap">账目保存在当前设备的网页 App 中。换机、清理网站数据或删除主屏幕 App 前，请先导出完整备份到「文件」。</p></section>`;
+    <section class="panel section-gap"><h2>存储位置</h2><p class="muted section-gap">账目保存在当前设备。换机、清理网站数据或移除应用前，请先导出完整备份到「文件」。</p></section>`;
 }
 
 function ledgers(book,ui) {

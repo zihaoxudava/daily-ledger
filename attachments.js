@@ -42,28 +42,6 @@ export function requireAttachment(bytes,item) {
   return bytes;
 }
 
-function encode(blob) {
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=()=>resolve(reader.result.slice(reader.result.indexOf(',')+1));
-    reader.onerror=()=>reject(new Error('无法读取附件，请重新添加后备份。'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-export async function buildBackup(book,files) {
-  const json=JSON.stringify(book,null,2);
-  if (!files.size) return new Blob([json],{type:'application/json'});
-  const parts=[json.slice(0,-2),',\n  "attachmentFiles": {\n'];
-  let separator='';
-  for (const [id,blob] of files) {
-    parts.push(separator,JSON.stringify(id),':"',await encode(blob),'"');
-    separator=',\n';
-  }
-  parts.push('\n  }\n}');
-  return new Blob(parts,{type:'application/json'});
-}
-
 export function restoreAttachmentFiles(book,data) {
   const index=attachmentIndex(book);
   const files=new Map();
