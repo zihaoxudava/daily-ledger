@@ -15,10 +15,13 @@ let nativeWrite=Promise.resolve();
 export const initial = () => ({
   version:1, groups:structuredClone(defaultGroups), categories:structuredClone(defaultCategories),
   accounts:structuredClone(defaultAccounts), entries:[], budgets:[], rules:[], debts:[],
+  savings:[], savingDeposits:[],
 });
 
 function withDefaults(book) {
   if (book.debts===undefined) book={...book,debts:[]};
+  if (book.savings===undefined) book={...book,savings:[]};
+  if (book.savingDeposits===undefined) book={...book,savingDeposits:[]};
   if (!Array.isArray(book.categories) || !Array.isArray(book.groups) || book.categories.length>=MAX_CATEGORIES) return book;
   const expenseGroups=new Set(book.groups.filter(group=>group?.type==='expense').map(group=>group.id));
   const alreadyPresent=book.categories.some(category=>category?.id===tobaccoCategory.id ||
@@ -31,6 +34,45 @@ function withDefaults(book) {
 export const debtOf = (book,id) => book.debts.find(item=>item.id===id);
 export const debtRepaid = debt => debt.payments.reduce((sum,payment)=>sum+payment.amount,0);
 export const debtRemaining = debt => debt.amount-debtRepaid(debt);
+export const savingOf = (book,id) => book.savings.find(plan=>plan.id===id);
+const dayMs=86_400_000;
+const dayStamp=date=>Date.parse(`${date}T00:00:00Z`);
+
+function scheduledSaving(plan,date) {
+  const end=plan.end && plan.end<date ? plan.end : date;
+  return end<plan.start ? 0 : (Math.round((dayStamp(end)-dayStamp(plan.start))/dayMs)+1)*plan.daily;
+}
+
+export function savingTotals(plan,deposits,date) {
+  const due=scheduledSaving(plan,date);
+  const actual=deposits.reduce((sum,item)=>sum+(item.date<=date?item.amount:0),0);
+  const todayDue=date>=plan.start && (!plan.end || date<=plan.end) ? plan.daily : 0;
+  return {todayDue,due,actual,pending:Math.max(0,due-actual)};
+}
+
+export function savingCalendar(plan,deposits,date,limit) {
+  const amounts=new Map();
+  let end=plan.end && plan.end<date ? plan.end : date;
+  let actual=0;
+  for (const item of deposits) {
+    if (item.date>date) continue;
+    amounts.set(item.date,(amounts.get(item.date) ?? 0)+item.amount);
+    actual+=item.amount;
+    if (item.date>end) end=item.date;
+  }
+  const days=[];
+  const start=dayStamp(plan.start);
+  let mark=dayStamp(end);
+  while (mark>=start && days.length<limit) {
+    const date=new Date(mark).toISOString().slice(0,10);
+    const deposited=amounts.get(date) ?? 0;
+    days.push({date,deposited,due:!plan.end || date<=plan.end?plan.daily:0,
+      pending:Math.max(0,scheduledSaving(plan,date)-actual)});
+    actual-=deposited;
+    mark-=dayMs;
+  }
+  return {days,more:mark>=start};
+}
 
 export function today() {
   const d = new Date();
@@ -105,6 +147,10 @@ export function validate(book) {
     budgetKeys.add(key);
     return true;
   }, 6000);
+  const savings=indexList(book.savings, plan=>validText(plan.name,40) && validAmount(plan.daily) &&
+    validDate(plan.start) && (plan.end==='' || validDate(plan.end) && plan.end>=plan.start),20);
+  indexList(book.savingDeposits, item=>savings.has(item.plan) && validDate(item.date) &&
+    item.date>=savings.get(item.plan).start && validAmount(item.amount) && validText(item.note,160,true),60000);
   indexList(book.rules, r => r.id.length <= 80 && validText(r.name,60) && ['expense','income'].includes(r.type) && validAmount(r.amount) &&
     validDate(r.start) && (!r.end || validDate(r.end) && r.end >= r.start) && accounts.has(r.account) && matches(r.category,r.type) &&
     Object.hasOwn(frequencies, r.frequency) && Number.isSafeInteger(r.next) && r.next >= 0 && r.next < 5400 && typeof r.paused === 'boolean' &&

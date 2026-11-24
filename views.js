@@ -1,5 +1,6 @@
 import { types, accountTypes, frequencies } from './catalog.js';
-import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining, newestFirst, dateAndTime } from './store.js';
+import { today, shiftMonth, money, totals, balances, spending, groupOf, categoryOf, accountOf, categoryLabel, debtRemaining,
+  newestFirst, dateAndTime, savingOf, savingTotals, savingCalendar } from './store.js';
 import { occurrence } from './schedule.js';
 import { releases } from './releases.js';
 import { android } from './native.js';
@@ -68,7 +69,8 @@ function setting(glyph,title,subtitle,action,target='') {
 }
 
 export function nav(page, mobile) {
-  const current = ['accounts','categories','files','updates'].includes(page) ? 'settings' : page;
+  const current = ['accounts','categories','files','updates','savings','saving-detail'].includes(page) ? 'settings' :
+    page==='report-detail' ? 'reports' : page;
   const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''}>${icon(tab)}<span>${titles[tab]}</span></a>`;
   if (!mobile) return tabs.map(link).join('');
   return [link('overview'),link('records'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('reports'),link('debts'),link('settings')].join('');
@@ -127,12 +129,16 @@ export function entryRow(book, entry, selection=null) {
 }
 
 const colors = ['#3e7859','#90a94b','#5076a2','#ba845a','#846c9f','#c09b49','#5a928f','#bd727a'];
-function breakdown(book, entries, chart=false) {
+const reportAction=(type,period='',group='')=>
+  `data-action="report-detail" data-id="${type}" data-report-period="${esc(period)}" data-report-group="${esc(group)}"`;
+
+function breakdown(book, entries, period='') {
   const rows = [...spending(book,entries)].filter(([,amount]) => amount!==0).sort((a,b) => b[1]-a[1]);
   if (!rows.length) return empty('reports','暂无分类支出','记录支出后，这里会显示各分类组的金额。');
   const sum = rows.reduce((total,[,amount]) => total+Math.max(0,amount),0);
   let cursor=0;
   const stops=[];
+  const sectors=[];
   const items = rows.map(([group,amount],index) => {
     const percent = sum ? Math.max(0,amount)*100/sum : 0;
     const name=groupOf(book,group).name;
@@ -140,10 +146,14 @@ function breakdown(book, entries, chart=false) {
     if (percent) {
       stops.push(`${color} ${cursor}% ${cursor+percent}%`);
       cursor+=percent;
+      sectors.push([cursor,group]);
     }
-    return `<li><span><i class="category-dot" style="background:${color}"></i> ${esc(name)}</span><span>${amount<0?'净退款':Math.round(percent)+'%'}</span><strong class="number">${money(amount)}</strong></li>`;
+    const body=`<span><i class="category-dot" style="background:${color}"></i> ${esc(name)}</span><span>${amount<0?'净退款':Math.round(percent)+'%'}</span><strong class="number">${money(amount)}</strong>`;
+    return `<li>${period?`<button type="button" class="category-line" ${reportAction('expense',period,group)}>${body}${icon('right')}</button>`:
+      `<div class="category-line">${body}</div>`}</li>`;
   }).join('');
-  const ring = chart && stops.length ? `<div aria-hidden="true" class="donut" style="background:conic-gradient(${stops.join(',')})"><b>支出占比</b></div>` : '';
+  const ring = period && stops.length ? `<button type="button" class="donut" ${reportAction('expense',period)}
+    data-report-sectors="${esc(JSON.stringify(sectors))}" aria-label="查看净支出账单" style="background:conic-gradient(${stops.join(',')})"><b>支出占比</b></button>` : '';
   return ring+`<ul class="category-list">${items}</ul>`;
 }
 
@@ -199,6 +209,7 @@ function overview(book, ui) {
         <div class="quick-heading"><h2>快速记账</h2>${button('批量记账','batch','secondary')}</div>
         <div class="quick-actions">${quick}</div>
         <a class="asset-inline" href="#accounts"><span>当前账户净余额</span>${value(assets)}</a>
+        <a class="asset-inline saving-shortcut" href="#savings"><span>定期存款</span>${icon('right')}</a>
       </section>
     </div>
     <div class="lower-grid">
@@ -223,14 +234,19 @@ export function filtered(book, ui) {
       .some(item => String(item ?? '').toLowerCase().includes(query)))));
 }
 
-export function recordsList(book,ui) {
-  const list = filtered(book,ui);
+function datedRows(book,entries,selection=null) {
   const groups=new Map();
-  const visible = list.slice(0,ui.limit);
-  for (const entry of visible) {
+  for (const entry of entries) {
     if (!groups.has(entry.date)) groups.set(entry.date,[]);
     groups.get(entry.date).push(entry);
   }
+  return [...groups].map(([day,rows]) => `<section class="date-group"><h3 class="date-heading">${day}</h3>
+    <div class="transactions">${rows.map(e=>entryRow(book,e,selection)).join('')}</div></section>`).join('');
+}
+
+export function recordsList(book,ui) {
+  const list = filtered(book,ui);
+  const visible = list.slice(0,ui.limit);
   const selection=ui.entrySelection;
   const actions=selection ? button('退出多选','select-entries','neutral') : list.length?
     button('多选','select-entries')+button('导出当前结果','export-filter','neutral') : '';
@@ -240,7 +256,7 @@ export function recordsList(book,ui) {
       <button type="button" class="button primary" data-action="bulk-datetime"${selection.size?'':' disabled'}>批量改时间</button>
     </div>`:'';
   return `<div class="panel-head"><h2>账目 <span class="muted">· ${list.length} 笔</span></h2><div class="actions">${actions}</div></div>` + toolbar + (list.length
-    ? [...groups].map(([day,rows]) => `<section class="date-group"><h3 class="date-heading">${day}</h3><div class="transactions">${rows.map(e=>entryRow(book,e,selection)).join('')}</div></section>`).join('')
+    ? datedRows(book,visible,selection)
     : empty('records','没有匹配的账目','可以换个筛选条件，或者记一笔。')) +
     (list.length>visible.length ? `<div class="section-gap">${button('显示更多','load-more','secondary')}</div>` : '');
 }
@@ -265,18 +281,41 @@ function reportBars(book, month, yearly) {
     return {key,...totals(monthly(book,key))};
   });
   const max = Math.max(1,...data.flatMap(row=>[row.income,row.expense]));
+  const bar=(key,type,title,amount)=>`<button type="button" class="report-bar" ${reportAction(type,key)}
+    aria-label="${fmtMonth(key)} ${title} ${money(amount)}"><i class="bar ${type}" style="height:${Math.max(0,amount)*100/max}%"></i></button>`;
   const plot=data.map(({key,income,expense})=>
-    `<div class="bar-cell" role="img" aria-label="${fmtMonth(key)} 收入 ${money(income)}，净支出 ${money(expense)}" title="${fmtMonth(key)} 收入 ${money(income)}，净支出 ${money(expense)}"><div class="bar-area"><i class="bar income" style="height:${income*100/max}%"></i><i class="bar" style="height:${Math.max(0,expense)*100/max}%"></i></div><span>${Number(key.slice(5))}月</span></div>`).join('');
-  return `<div class="bars" style="grid-template-columns:repeat(${count},minmax(0,1fr))">${plot}</div><div class="legend"><span><i class="income"></i>收入</span><span><i></i>净支出</span></div>`;
+    `<div class="bar-cell"><div class="bar-area">${bar(key,'income','收入',income)}${bar(key,'expense','净支出',expense)}</div>
+    <button type="button" class="report-month" ${reportAction('balance',key)} aria-label="${fmtMonth(key)}收支明细">${Number(key.slice(5))}月</button></div>`).join('');
+  return `<div class="bars ${yearly?'year-bars':''}">${plot}</div><div class="legend"><span><i class="income"></i>收入</span><span><i></i>净支出</span></div>`;
 }
 function reports(book,ui) {
   const periodKey = ui.year ? ui.month.slice(0,4) : ui.month;
   const entries = book.entries.filter(entry => entry.date.startsWith(periodKey));
   const {income,expense,net} = totals(entries);
+  const metric=(text,type,amount)=>`<button type="button" class="panel metric report-metric" ${reportAction(type,periodKey)}><span>${text}${icon('right')}</span>${value(amount)}</button>`;
   return header('统计','查看收支趋势和分类支出',period(ui.month,ui.year)) +
     `<div class="inline-actions"><div class="segments"><button data-action="report-range" data-id="month" ${selected(ui.year,false)}>按月</button><button data-action="report-range" data-id="year" ${selected(ui.year,true)}>按年</button></div></div>
-     <div class="metric-grid"><section class="panel metric"><span>收入</span>${value(income)}</section><section class="panel metric"><span>净支出</span>${value(expense)}</section><section class="panel metric"><span>结余</span>${value(net)}</section></div>
-     <div class="lower-grid"><section class="panel">${panelHead(ui.year?'全年趋势':'近 6 个月趋势')}${reportBars(book,ui.month,ui.year)}</section><section class="panel">${panelHead('分类支出')}${breakdown(book,entries,true)}</section></div>`;
+     <div class="metric-grid">${metric('收入','income',income)}${metric('净支出','expense',expense)}${metric('结余','balance',net)}</div>
+     <div class="lower-grid"><section class="panel">${panelHead(ui.year?'全年趋势':'近 6 个月趋势')}${reportBars(book,ui.month,ui.year)}</section><section class="panel">${panelHead('分类支出')}${breakdown(book,entries,periodKey)}</section></div>`;
+}
+
+function reportDetail(book,ui) {
+  const back=button('返回统计','back-report','neutral');
+  const scope=ui.reportDetail;
+  if (!scope) return header('统计明细','',back);
+  const {period,kind,group}=scope;
+  const entries=latest([...book.entries].reverse().filter(entry=>entry.date.startsWith(period) &&
+    (kind==='income'?entry.type==='income':kind==='expense'?['expense','refund'].includes(entry.type):entry.type!=='transfer') &&
+    (!group || categoryOf(book,entry.category)?.group===group)));
+  const title=groupOf(book,group)?.name ?? {income:'收入',expense:'净支出',balance:'收支'}[kind];
+  const summary=totals(entries);
+  const amount=summary[kind==='balance'?'net':kind];
+  const rows=entries.slice(0,ui.drillLimit);
+  const periodName=period.length===4?`${period}年`:fmtMonth(period);
+  return header(`${esc(title)}明细`,periodName,back)+`<section class="panel">
+    ${panelHead(`${periodName} · ${entries.length} 笔`,value(amount))}
+    ${rows.length?datedRows(book,rows):empty('records','该范围没有账目')}
+    ${entries.length>rows.length?`<div class="section-gap">${button('显示更多','more-report')}</div>`:''}</section>`;
 }
 
 function plan(book,ui) {
@@ -297,6 +336,62 @@ function plan(book,ui) {
     ${rules || empty('plan','暂无周期账单','适用于房租、会员、工资和分期。到期后打开账本时入账。')}</section></div>`;
 }
 
+function savingSummary(result) {
+  return `<div class="metric-grid saving-metrics">${[
+    ['今日应存',result.todayDue],['累计应存',result.due],['累计待存',result.pending],
+  ].map(([title,amount])=>`<section class="panel metric"><span>${title}</span>${value(amount)}</section>`).join('')}</div>`;
+}
+
+function savings(book) {
+  const date=today();
+  const byPlan=new Map();
+  for (const deposit of book.savingDeposits) {
+    if (!byPlan.has(deposit.plan)) byPlan.set(deposit.plan,[]);
+    byPlan.get(deposit.plan).push(deposit);
+  }
+  const total={todayDue:0,due:0,actual:0,pending:0};
+  const plans=book.savings.map(plan=>{
+    const result=savingTotals(plan,byPlan.get(plan.id) ?? [],date);
+    for (const key of Object.keys(total)) total[key]+=result[key];
+    const status=plan.start>date?'未开始':plan.end && plan.end<date?'已结束':'进行中';
+    return `<div class="manage-row saving-row">
+      <div><h3>${esc(plan.name)}</h3><p>${status} · 每日 ${money(plan.daily)}</p><p>已存 ${money(result.actual)} · 待存 ${money(result.pending)}</p></div>
+      <div class="actions">${button('查看明细','saving-detail','neutral',plan.id)}${button('记存入','saving-deposit','secondary',plan.id)}</div></div>`;
+  }).join('');
+  return header('定期存款','按天累计应存和待存',button('新增计划','saving','primary'))+
+    `<section class="balance-card saving-total"><div class="balance-title">存款总量（累计实存）</div><div class="balance-value number">${money(total.actual)}</div></section>`+
+    savingSummary(total)+`<section class="panel section-gap">${panelHead('存款计划')}
+      ${plans||empty('wallet','还没有存款计划','设置每日金额和开始日期，账本就会自动累计应存。')}</section>`;
+}
+
+function savingDetail(book,ui) {
+  const plan=savingOf(book,ui.savingDetailId);
+  const back=button('返回','back-saving','neutral');
+  if (!plan) return header('存款明细','',back)+empty('wallet','这项存款计划已移除');
+  const date=today();
+  const deposits=latest(book.savingDeposits.filter(item=>item.plan===plan.id).reverse());
+  const result=savingTotals(plan,deposits,date);
+  const {days,more}=savingCalendar(plan,deposits,date,ui.savingDays);
+  const calendar=days.map(day=>`<div class="saving-day">
+    <time datetime="${day.date}">${day.date}</time><span class="number">${money(day.due)}</span><span class="number">${money(day.deposited)}</span>
+    <span class="number">${money(day.pending)}</span></div>`).join('');
+  const history=deposits.slice(0,ui.depositLimit).map(item=>`<div class="manage-row saving-deposit-row">
+    <div><strong>${item.date}</strong>${item.note?`<p>${esc(item.note)}</p>`:''}</div>
+    <div class="actions">${value(item.amount)}${button('编辑','edit-saving-deposit','neutral',item.id)}</div></div>`).join('');
+  return header(esc(plan.name),'存款明细',back)+`
+    <section class="balance-card saving-total"><div class="balance-title">存款总量（累计实存）</div><div class="balance-value number">${money(result.actual)}</div></section>
+    ${savingSummary(result)}
+    <section class="panel section-gap">${panelHead('计划设置',button('编辑计划','saving','neutral',plan.id))}
+      <p class="muted">每日存 ${money(plan.daily)} · ${plan.start} 起${plan.end?` · ${plan.end} 结束`:''}</p></section>
+    <section class="panel section-gap">${panelHead('每日存款')}
+      ${days.length?`<div class="saving-calendar"><div class="saving-day saving-day-head"><span>日期</span><span>当日应存</span><span>当日实存</span><span>累计待存</span></div>${calendar}</div>`:
+        empty('plan','计划还未开始')}
+      ${more?`<div class="section-gap">${button('显示更早','more-saving-days')}</div>`:''}</section>
+    <section class="panel section-gap">${panelHead('实存记录',button('记存入','saving-deposit','primary',plan.id))}
+      ${history||empty('wallet','还没有实存记录')}
+      ${deposits.length>ui.depositLimit?`<div class="section-gap">${button('显示更多','more-saving-deposits')}</div>`:''}</section>`;
+}
+
 function settings() {
   return header('更多','管理账户、分类与本机数据')+`
     <section class="panel">${panelHead('账本管理')}<div class="setting-grid">
@@ -304,6 +399,7 @@ function settings() {
     ${setting('transfer','借出借入','分别查看待收回和待归还的钱','','#debts')}
     ${setting('categories','分类','自定义分类组和二级分类','','#categories')}
     ${setting('plan','预算与周期','分类预算、订阅、分期和固定收支','','#plan')}
+    ${setting('wallet','定期存款','设置每日存款，查看应存、待存和实存','','#savings')}
     ${setting('file','数据与备份','完整备份、CSV 和恢复','','#files')}
     </div></section>
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">
@@ -379,4 +475,4 @@ function debts(book) {
     `<div class="top-grid debt-grid">${sections}</div>`;
 }
 
-export const pages = {overview,records,reports,plan,settings,accounts,categories,files,debts,updates,months:monthOverview};
+export const pages = {overview,records,reports,'report-detail':reportDetail,plan,settings,accounts,categories,files,debts,updates,months:monthOverview,savings,'saving-detail':savingDetail};

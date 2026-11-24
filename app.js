@@ -1,6 +1,6 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
 import { today, shiftMonth, uid, money, parseMoney, readBook, readBackup, writeBook, applyRecurring, hasDueRecurring, validate,
-  validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining } from './store.js';
+  validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
@@ -26,11 +26,13 @@ const ui = {
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
   monthOverviewYear:Number(today().slice(0,4)),
   entrySelection:null,
+  drillLimit:50, savingDays:14, depositLimit:30,
 };
 const monthOrigins = new Set(['overview','records','reports','plan']);
 let book, page, modal, fileMode, toastTimer, busy=false, storageError;
 let pendingRefresh=0, refreshing=false;
 let runningActions=0, pickingFile=false, updateScroll;
+let lastSavingsDate;
 try {
   const view=JSON.parse(sessionStorage.getItem(updateViewKey));
   sessionStorage.removeItem(updateViewKey);
@@ -72,9 +74,11 @@ function route(resetScroll=false) {
   const previous=page;
   page = Object.hasOwn(pages,hash) ? hash : 'overview';
   if (page!=='records') ui.entrySelection=null;
+  ui.reportDetail=page==='report-detail' ? history.state?.reportDetail : null;
+  ui.savingDetailId=page==='saving-detail' ? history.state?.savingId : null;
   render();
   if (page==='updates') markReleaseSeen();
-  if (resetScroll) scrollTo(0,0);
+  if (resetScroll) scrollTo(0,previous==='report-detail' && page==='reports' ? history.state?.reportScroll ?? 0 : 0);
   if (book && previous && previous!==page) {
     pageAnimation?.cancel();
     pageAnimation=enter(content,5,150);
@@ -105,6 +109,7 @@ function render() {
     content.innerHTML = `<section class="panel system-message"><h1>无法打开本机账本</h1><p>${esc(storageError)}</p><p>请退出无痕模式，并从添加到主屏幕的图标重新打开。</p><p><button class="button primary" data-action="reload" type="button">重试</button></p></section>`;
   } else if (book) {
     content.innerHTML = pages[page](book,ui);
+    if (page==='savings' || page==='saving-detail') lastSavingsDate=today();
     if (updateScroll!==undefined) {
       const y=updateScroll;
       updateScroll=undefined;
@@ -441,6 +446,25 @@ function openBudget(budget) {
   modalFrame({kind:'budget',id:budget?.id},budget?'编辑预算':'设置预算',html,(budget?remove('删除'):cancel)+submit('保存预算'));
 }
 
+function openSaving(plan) {
+  const html=`
+    ${label('计划名称',textInput('name',plan?.name ?? '',40,true,'例如：每天存 20 元'))}
+    ${label('每天应存（元）',amountInput(plan?.daily))}
+    <div class="field-row">${label('开始日期',dateInput('start',plan?.start ?? today()))}
+    ${label('结束日期（选填）',dateInput('end',plan?.end ?? '',false))}</div>
+    <p>${plan?'调整每日金额或起止日期会重算这项计划的应存。':'每天按计划累计应存，实际存入后点「记存入」。'}</p>`;
+  modalFrame({kind:'saving',id:plan?.id},plan?'编辑存款计划':'新增存款计划',html,(plan?remove('删除计划'):cancel)+submit('保存计划'));
+}
+
+function openSavingDeposit(plan,item) {
+  const html=`<p>${esc(plan.name)}</p>
+    ${label('实存金额（元）',amountInput(item?.amount ?? plan.daily))}
+    ${label('存入日期',dateInput('date',item?.date ?? today()))}
+    ${label('备注',textInput('note',item?.note ?? '',160,false,'选填'))}`;
+  modalFrame({kind:'saving-deposit',id:item?.id,planId:plan.id},item?'编辑实存记录':'记存入',html,
+    (item?remove('删除'):cancel)+submit('保存实存'));
+}
+
 function openAccount(account) {
   const html = `
     ${label('账户名称',textInput('name',account?.name ?? '',28,true))}
@@ -703,6 +727,23 @@ const save = {
       '该月已有同范围预算，请在预算列表编辑原预算。');
     upsert(current.budgets,item);
   },
+  saving(current,s,get) {
+    const previous=savingOf(current,s.id);
+    if (s.id) must(previous,'这项存款计划已移除。');
+    const plan={id:s.id ?? uid(),name:get('name'),daily:parseMoney(get('amount')),start:get('start'),end:get('end')};
+    must(plan.name,'请填写计划名称。');
+    must(validDate(plan.start) && (!plan.end || validDate(plan.end) && plan.end>=plan.start),'请选择有效的开始和结束日期。');
+    must(!current.savingDeposits.some(item=>item.plan===plan.id && item.date<plan.start),'开始日期不能晚于已有的实存记录。');
+    upsert(current.savings,plan);
+  },
+  'saving-deposit'(current,s,get) {
+    const plan=savingOf(current,s.planId);
+    must(plan,'这项存款计划已移除。');
+    if (s.id) must(current.savingDeposits.some(item=>item.id===s.id && item.plan===plan.id),'这笔实存记录已移除。');
+    const item={id:s.id ?? uid(),plan:plan.id,date:get('date'),amount:parseMoney(get('amount')),note:get('note')};
+    must(validDate(item.date) && item.date>=plan.start && item.date<=today(),'请选择从计划开始到今天之间的日期。');
+    upsert(current.savingDeposits,item);
+  },
   account(current,s,get) {
     const item={id:s.id ?? uid(),name:get('name'),type:get('type'),opening:parseMoney(get('amount'),true),archived:get('archived')==='yes'};
     must(item.name && !current.accounts.some(a=>a.name===item.name && a.id!==item.id),'请填写未被占用的账户名。');
@@ -748,8 +789,10 @@ const save = {
 
 function askDelete() {
   const state=modal;
-  const labels={entry:'这笔账目',budget:'这项预算',rule:'这条周期规则',debt:'这项借款及其全部还款记录','debt-payment':'这笔还款记录'};
-  const collection={entry:'entries',budget:'budgets',rule:'rules',debt:'debts','debt-payment':'payments'}[state.kind];
+  const labels={entry:'这笔账目',budget:'这项预算',rule:'这条周期规则',debt:'这项借款及其全部还款记录',
+    'debt-payment':'这笔还款记录',saving:'这项存款计划及其全部实存记录','saving-deposit':'这笔实存记录'};
+  const collection={entry:'entries',budget:'budgets',rule:'rules',debt:'debts','debt-payment':'payments',
+    saving:'savings','saving-deposit':'savingDeposits'}[state.kind];
   modalFrame({kind:'delete',id:state.id,collection,debtId:state.debtId},'确认删除',
     `<p>删除${labels[state.kind]}后无法撤销。${state.kind==='rule'?'已经生成的账目仍会保留。':''}</p>`,cancel+'<button type="submit" class="button danger">确认删除</button>');
 }
@@ -771,6 +814,7 @@ async function submitModal(event) {
         const owner=state.collection==='payments' ? debtOf(current,state.debtId) : current;
         must(owner,'这项借款已被移除。');
         owner[state.collection]=owner[state.collection].filter(item=>item.id!==state.id);
+        if (state.collection==='savings') current.savingDeposits=current.savingDeposits.filter(item=>item.plan!==state.id);
       },'已删除');
     } else if (state.kind==='restore') {
       await commit(()=>state.data,'已恢复完整备份',undefined,state.files);
@@ -847,7 +891,7 @@ async function inspectFile() {
       const data=validate(contents);
       const files=restoreAttachmentFiles(data,attachmentFiles);
       modalFrame({kind:'restore',data,files},'确认恢复备份',`<p>${esc(file.name)}</p>
-        <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户、${data.budgets.length} 项预算${files.size?`和 ${files.size} 个附件`:''}。</p>
+        <p>备份含 ${data.entries.length} 笔账目、${data.debts.length} 项借出借入、${data.accounts.length} 个账户、${data.budgets.length} 项预算${data.savings.length?`、${data.savings.length} 项存款计划`:''}${files.size?`和 ${files.size} 个附件`:''}。</p>
         <p>恢复会替换当前账本的全部内容。需要保留当前账目时，请先取消并导出本机备份。</p>`,cancel+submit('替换并恢复'));
     }
   } catch (error) {
@@ -868,6 +912,24 @@ function updateSelection() {
   $('[data-action="bulk-datetime"]').disabled=!count;
   const checks=visibleEntryChecks();
   $('[data-action="select-visible"]').textContent=checks.every(check=>check.checked)?'取消全选':'全选已显示';
+}
+
+function openReportDetail(kind,button,event) {
+  const period=button.dataset.reportPeriod;
+  let group=button.dataset.reportGroup;
+  if (button.dataset.reportSectors && event.detail) {
+    const bounds=button.getBoundingClientRect();
+    const x=event.clientX-bounds.left-bounds.width/2;
+    const y=event.clientY-bounds.top-bounds.height/2;
+    if (Math.hypot(x,y)>bounds.width*.32) {
+      const position=(Math.atan2(x,-y)*50/Math.PI+100)%100;
+      group=JSON.parse(button.dataset.reportSectors).find(([end])=>position<end)?.[1] ?? '';
+    }
+  }
+  history.replaceState({...history.state,reportScroll:scrollY},'');
+  history.pushState({reportDetail:{period,kind,group}},'','#report-detail');
+  ui.drillLimit=50;
+  route(true);
 }
 
 const actions = {
@@ -925,6 +987,25 @@ const actions = {
     updateSelection();
   },
   'bulk-datetime':openBulkDateTime,
+  'report-detail':openReportDetail,
+  'back-report':()=>{ if (ui.reportDetail) history.back(); else location.hash='reports'; },
+  'more-report':()=>{ ui.drillLimit+=50; render(); },
+  saving:id=>openSaving(savingOf(book,id)),
+  'saving-detail':id=>{
+    history.pushState({savingId:id},'','#saving-detail');
+    ui.savingDays=14;
+    ui.depositLimit=30;
+    route(true);
+  },
+  'back-saving':()=>{ if (ui.savingDetailId) history.back(); else location.hash='savings'; },
+  'more-saving-days':()=>{ ui.savingDays+=14; render(); },
+  'more-saving-deposits':()=>{ ui.depositLimit+=30; render(); },
+  'saving-deposit':id=>{ const plan=savingOf(book,id); if (plan) openSavingDeposit(plan); },
+  'edit-saving-deposit':id=>{
+    const item=book.savingDeposits.find(record=>record.id===id);
+    const plan=item && savingOf(book,item.plan);
+    if (plan) openSavingDeposit(plan,item);
+  },
   budget:id=>openBudget(book.budgets.find(b=>b.id===id)),
   account:id=>openAccount(accountOf(book,id)),
   group:id=>openGroup(groupOf(book,id)),
@@ -994,7 +1075,7 @@ document.addEventListener('click',async event=>{
   if (!book && !['reload','offline-info','close'].includes(action)) return;
   if (!Object.hasOwn(actions,action)) return;
   runningActions++;
-  try { await actions[action](id,button); }
+  try { await actions[action](id,button,event); }
   catch (error) { if (dialog.open) errorInModal(showError(error)); else tell(showError(error)); }
   finally { runningActions--; }
 });
@@ -1047,7 +1128,7 @@ if (/iP(?:ad|hone|od)/.test(navigator.userAgent) || (navigator.platform==='MacIn
   let touchStart, lastTap;
   const resetTaps=()=>{ touchStart=lastTap=undefined; };
   document.addEventListener('touchstart',event=>{
-    if (event.touches.length!==1 || event.target.closest('dialog button, #records-list button, input, select, textarea, label')) {
+    if (event.touches.length!==1 || event.target.closest('dialog button, #records-list button, [data-action="report-detail"], [data-action="back-report"], input, select, textarea, label')) {
       resetTaps();
       return;
     }
@@ -1240,6 +1321,9 @@ window.addEventListener('appinstalled',()=>{
 setInterval(()=>{
   if (document.visibilityState==='visible' && !dialog.open) checkUpdate();
 },300_000);
+setInterval(()=>{
+  if (book && !dialog.open && (page==='savings' || page==='saving-detail') && lastSavingsDate!==today()) render();
+},60_000);
 $('#release-summary').textContent=`${appVersion} · ${currentRelease.title}`;
 releaseNotice.hidden=seenRelease===appVersion;
 offlineStatus();
