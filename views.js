@@ -71,9 +71,13 @@ function setting(glyph,title,subtitle,action,target='') {
   return target ? `<a class="setting" href="${target}">${inner}</a>` : `<button type="button" class="setting" data-action="${action}">${inner}</button>`;
 }
 
-export function nav(page, mobile) {
-  const current = ['accounts','categories','files','updates','savings','saving-detail','appearance','auto'].includes(page) ? 'settings' :
+export function navSection(page) {
+  return ['accounts','categories','files','updates','savings','saving-detail','appearance','auto'].includes(page) ? 'settings' :
     page==='report-detail' ? 'reports' : page;
+}
+
+export function nav(page, mobile) {
+  const current=navSection(page);
   const link = tab => `<a href="#${tab}"${current===tab?' aria-current="page"':''} aria-label="${pageNames[tab]}">${icon(tab==='ledgers'?'wallet':tab)}<span>${mobile && tab==='ledgers'?'账本':mobile && tab==='debts'?'借还':pageNames[tab]}</span></a>`;
   if (!mobile) return tabs.map(link).join('');
   return [link('overview'),link('records'),link('reports'),`<button data-action="new" type="button"><span class="tab-plus">${icon('plus')}</span><span>记一笔</span></button>`,link('debts'),link('ledgers'),link('settings')].join('');

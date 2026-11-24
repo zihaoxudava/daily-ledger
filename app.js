@@ -9,7 +9,7 @@ import { releases } from './releases.js';
 import { buildBackup, restoreAttachmentFiles, attachmentFromFile } from './attachments.js';
 import { noteFields, noteDraft, mountNote, readNote } from './note.js';
 import { android, pendingPayments, acknowledgePayments } from './native.js';
-import { pages, nav, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
+import { pages, nav, navSection, esc, icon, option, optionMap, label, dateInput, amountInput, textInput,
   categoryOptions, accountOptions, groupOptions, filtered, recordsList, fmtMonth, wallpaperPageNames } from './views.js';
 
 const $ = selector => document.querySelector(selector);
@@ -101,7 +101,7 @@ function requestPersistence() {
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledger-changes') : null;
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
 const motion = matchMedia('(prefers-reduced-motion: no-preference)');
-let pageAnimation, toastAnimation;
+let pageAnimation, toastAnimation, dialogExit, highlightedNav;
 let wallKey,wallMediaKey,wallURL,wallTask=0;
 const wallLayer=$('#page-wallpaper');
 const defaultStatusTint='#f4f6f3';
@@ -201,21 +201,57 @@ function syncWallpaper() {
 }
 motion.addEventListener?.('change',syncWallpaper);
 
-function enter(element, distance, duration) {
+function enter(element,{y=7,duration=190,opacity=.44}={}) {
   if (!motion.matches || !element.animate) return;
   return element.animate([
-    {opacity:.86,transform:`translateY(${distance}px) scale(.995)`},
+    {opacity,transform:`translateY(${y}px)`},
     {opacity:1,transform:'translateY(0)'},
   ],{duration,easing:'cubic-bezier(.2,.75,.25,1)'});
+}
+
+function finishDialogExit() {
+  const animation=dialogExit;
+  dialogExit=undefined;
+  animation?.cancel();
+  dialog.classList.remove('is-leaving');
+  dialog.inert=false;
+}
+
+function closeModal() {
+  if (!dialog.open) return;
+  if (!motion.matches || !dialog.animate) {
+    dialog.close();
+    return;
+  }
+  const {top,left,width,height}=dialog.getBoundingClientRect();
+  for (const [key,value] of Object.entries({top,left,width,height})) {
+    dialog.style.setProperty(`--dialog-exit-${key}`,`${value}px`);
+  }
+  dialog.classList.add('is-leaving');
+  dialog.close();
+  dialog.inert=true;
+  const animation=dialogExit=dialog.animate([
+    {opacity:1,transform:'translateY(0)'},
+    {opacity:0,transform:`translateY(${dialog.classList.contains('batch-dialog')?18:8}px)`},
+  ],{duration:145,easing:'cubic-bezier(.4,0,1,1)'});
+  animation.finished.catch(()=>{}).then(()=>{
+    if (dialogExit!==animation) return;
+    finishDialogExit();
+    if (!dialog.open && !modal) dialogContent.replaceChildren();
+  });
 }
 
 function tell(message, success=false) {
   toast.innerHTML = `${success?icon('check'):''}<span>${esc(message)}</span>`;
   toast.hidden = false;
   toastAnimation?.cancel();
-  toastAnimation=enter(toast,7,170);
+  toastAnimation=enter(toast,{y:8,duration:185});
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.hidden=true; }, 4200);
+  toastTimer = setTimeout(()=>{
+    if (!motion.matches || !toast.animate) { toast.hidden=true; return; }
+    const animation=toastAnimation=toast.animate([{opacity:1},{opacity:0,transform:'translateY(4px)'}],{duration:145});
+    animation.finished.then(()=>{ if (toastAnimation===animation) toast.hidden=true; }).catch(()=>{});
+  },4200);
 }
 
 function showMobileBar() {
@@ -253,7 +289,7 @@ function route(resetScroll=false) {
   }
   if (book && previous && previous!==page) {
     pageAnimation?.cancel();
-    pageAnimation=enter(content,5,150);
+    pageAnimation=enter(content,{y:10,duration:210});
   }
 }
 
@@ -275,8 +311,18 @@ function finishMonthOverview(month) {
 
 function render() {
   const navPage=page==='months' ? monthOrigin() : page;
-  $('#side-nav').innerHTML = nav(navPage,false);
-  $('#tabbar').innerHTML = nav(navPage,true);
+  const active=navSection(navPage);
+  if (highlightedNav!==active) {
+    for (const [selector,mobile] of [['#side-nav',false],['#tabbar',true]]) {
+      const bar=$(selector);
+      if (!bar.childElementCount) bar.innerHTML=nav(navPage,mobile);
+      else for (const link of bar.querySelectorAll('a')) {
+        if (link.hash===`#${active}`) link.setAttribute('aria-current','page');
+        else link.removeAttribute('aria-current');
+      }
+    }
+    highlightedNav=active;
+  }
   if (storageError) {
     content.innerHTML = `<section class="panel system-message"><h1>无法打开本机账本</h1><p>${esc(storageError)}</p><p>请退出无痕模式，并从添加到主屏幕的图标重新打开。</p><p><button class="button primary" data-action="reload" type="button">重试</button></p></section>`;
   } else if (book) {
@@ -340,6 +386,7 @@ async function flushRefresh() {
 }
 
 function modalFrame(state, title, inner, actions) {
+  if (dialogExit) finishDialogExit();
   modal=state;
   const batch=state.kind==='batch';
   dialog.classList.toggle('batch-dialog',batch);
@@ -348,7 +395,7 @@ function modalFrame(state, title, inner, actions) {
     <form id="modal-form"><div class="modal-body">${inner}<p class="error" id="modal-error" role="alert" hidden></p></div>
     <footer class="modal-foot">${actions}</footer></form>`;
   if (!dialog.open) dialog.showModal();
-  else if (!batch || matchMedia('(min-width:760px)').matches) enter(dialogContent.querySelector('.modal-body'),3,130);
+  else if (!batch || !mobileLayout.matches) enter(dialogContent.querySelector('.modal-body'),{y:6,duration:160});
 }
 const cancel = '<button type="button" class="button neutral" data-action="close">取消</button>';
 const submit = text => `<button class="button primary" type="submit">${text}</button>`;
@@ -1016,7 +1063,7 @@ async function installApp() {
   $('#install-app').hidden=true;
   await prompt.prompt();
   if ((await prompt.userChoice).outcome==='accepted') {
-    dialog.close();
+    closeModal();
     tell('已确认安装，请从桌面或主屏幕打开。');
   }
 }
@@ -1064,7 +1111,7 @@ async function commit(change, message, afterWrite, files, global=false) {
   else await writeBook(change,files);
   afterWrite?.();
   channel?.postMessage('change');
-  dialog.close();
+  closeModal();
   route();
   if (message) tell(message,true);
 }
@@ -1226,7 +1273,7 @@ async function submitModal(event) {
   if (event.target.id !== 'modal-form') return;
   event.preventDefault();
   if (busy) return;
-  if (modal.kind==='info') { dialog.close(); return; }
+  if (modal.kind==='info') { closeModal(); return; }
   requestPersistence();
   const data=new FormData(event.target);
   const get=name=>String(data.get(name) ?? '').trim();
@@ -1514,13 +1561,13 @@ const actions = {
   'filter-scope':id=>{ ui.filter.all=id==='all'; ui.entrySelection?.clear(); ui.limit=50; render(); },
   'report-range':id=>{ ui.year=id==='year'; render(); },
   'load-more':()=>{ ui.limit+=50; renderRecordResults(); },
-  close:()=>{ if (!busy) dialog.close(); },
+  close:()=>{ if (!busy) closeModal(); },
   reload:()=>{ if (android && nativeRelease) android.openUpdate(nativeRelease.versionCode); else location.reload(); },
   'show-native-update':showNativeUpdate,
   'set-time':(_id,button)=>toggleTime(button,true),
   'clear-time':(_id,button)=>toggleTime(button,false),
   'show-releases':()=>{
-    dialog.close();
+    closeModal();
     location.hash='updates';
   },
   'dismiss-release':markReleaseSeen,
@@ -1653,13 +1700,16 @@ fileInput.addEventListener('change',async()=>{
 fileInput.addEventListener('cancel',()=>{ pickingFile=false; });
 categoryDialog.addEventListener('submit',saveQuickCategory);
 categoryDialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
-dialog.addEventListener('cancel',event=>{ if (busy) event.preventDefault(); });
-dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal.kind!=='batch') dialog.close(); });
+dialog.addEventListener('cancel',event=>{
+  event.preventDefault();
+  if (!busy) closeModal();
+});
+dialog.addEventListener('click',event=>{ if (event.target===dialog && !busy && modal?.kind!=='batch') closeModal(); });
 dialog.addEventListener('close',()=>{
   if (!dialog.open) {
     if (modal?.kind==='wallpaper') clearWallpaperPreview();
     modal=undefined;
-    dialogContent.replaceChildren();
+    if (!dialogExit) dialogContent.replaceChildren();
   }
   flushRefresh();
   capturePayments();
