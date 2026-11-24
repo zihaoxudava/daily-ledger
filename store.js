@@ -24,11 +24,16 @@ export const wallpaperPages = ['overview','records','reports','report-detail','p
   'accounts','categories','files','updates','months','savings','saving-detail','ledgers','appearance','auto'];
 export const wallpaperVideos = ['video/mp4','video/webm','video/quicktime'];
 export const wallpaperImages = ['image/jpeg','image/png','image/gif','image/webp','image/avif','image/bmp','image/heic','image/heif'];
+export const defaultWallpaperTransparency = 25;
 export const ledgerFor = (root,id) => root.ledgers?.find(item=>item.id===id)?.data ?? root;
 export function wallpaperFor(root,page) {
   const walls=root?.wallpapers;
-  const wall=walls?.[page] ?? walls?.overview;
-  return wall?.system ? undefined : wall;
+  const wall=walls?.[page];
+  if (wall?.system) return undefined;
+  if (wall?.media || wall?.color || page==='overview') return wall;
+  const overview=walls?.overview;
+  if (overview && wall?.transparency!==undefined) return {...overview,transparency:wall.transparency};
+  return overview;
 }
 
 function withDefaults(book) {
@@ -153,10 +158,11 @@ export function validate(book) {
   const wallpapers=book.wallpapers ?? {};
   if (typeof wallpapers!=='object' || Array.isArray(wallpapers) ||
       Object.entries(wallpapers).some(([page,wall])=>!wallpaperPages.includes(page) || !wall ||
-        (wall.system!==undefined && (wall.system!==true || page==='overview' || wall.color || wall.media!==undefined)) ||
+        (wall.system!==undefined && (wall.system!==true || page==='overview' || wall.color || wall.media!==undefined || wall.transparency!==undefined)) ||
         !(wall.color==='' || /^#[a-fA-F0-9]{6}$/.test(wall.color)) ||
         !Number.isInteger(wall.shade) || wall.shade<0 || wall.shade>85 || !['cover','contain'].includes(wall.fit) ||
         !['center','top','bottom'].includes(wall.position) ||
+        (wall.transparency!==undefined && (!Number.isInteger(wall.transparency) || wall.transparency<0 || wall.transparency>100)) ||
         (wall.media!==undefined && ![...wallpaperVideos,...wallpaperImages].includes(wall.media?.type)))) {
     throw new Error('页面背景设置无效。');
   }

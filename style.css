@@ -75,12 +75,15 @@ h3 { font-size:1rem; }
 .option-check input { width:19px; min-height:19px; flex:none; accent-color:#245a41; }
 .page-wallpaper { position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
 body.has-wallpaper { isolation:isolate; }
-.has-wallpaper :is(.sidebar,.mobile-bar,.tabbar) { background:rgb(248 250 247 / .72); }
+.has-wallpaper :is(.sidebar,.mobile-bar,.tabbar) { background:rgb(248 250 247 / var(--wall-surface)); }
 .page-wallpaper img,.page-wallpaper video { width:100%; height:100%; display:block; }
 .page-wallpaper::after { content:''; position:absolute; inset:0; background:rgb(246 249 246 / var(--wall-shade,0)); }
-.has-wallpaper .page-head { padding:12px; border-radius:18px; background:#fbfdfbef; }
-.has-wallpaper .panel { background:#fffffff2; }
-.has-wallpaper .ledger-card { background:linear-gradient(145deg,var(--ledger-light),#fffffff2 95%); }
+.has-wallpaper .page-head { padding:12px; border-radius:18px; background:rgb(251 253 251 / var(--wall-surface)); }
+.has-wallpaper :is(.panel,.period) { background:rgb(255 255 255 / var(--wall-surface)); }
+.has-wallpaper .ledger-card { background:linear-gradient(145deg,color-mix(in srgb,var(--ledger-light) calc(var(--wall-surface) * 100%),transparent),rgb(255 255 255 / var(--wall-surface)) 95%); }
+.has-wallpaper .saving-entry { background:rgb(238 246 228 / var(--wall-surface)); }
+.has-wallpaper .balance-card { background:linear-gradient(115deg,rgb(16 43 34 / var(--wall-surface)),rgb(29 70 51 / var(--wall-surface)) 98%); }
+#wall-transparency { color:#266144; font-weight:750; margin-inline-start:5px; font-variant-numeric:tabular-nums; }
 @supports (-webkit-touch-callout:none) {
   @media (display-mode:standalone) {
     body::before { content:''; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top); z-index:4; background:rgb(18 37 29 / .65); pointer-events:none; }

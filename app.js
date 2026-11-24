@@ -1,7 +1,8 @@
 import { types, accountTypes, frequencies, debtDirections } from './catalog.js';
 import { today, shiftMonth, uid, money, parseMoney, readBook as readRoot, readBackup, writeBook as writeRoot, applyRecurring, hasDueRecurring, validate,
   validDate, validMonth, validTime, newestFirst, dateAndTime, groupOf, accountOf, categoryOf, debtOf, debtRepaid, debtRemaining, savingOf,
-  initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, wallpaperFor, readAttachment, MAX_AMOUNT } from './store.js';
+  initial, ledgerFor, ledgerStyles, ledgerIcons, wallpaperImages, wallpaperVideos, wallpaperFor,
+  defaultWallpaperTransparency, readAttachment, MAX_AMOUNT } from './store.js';
 import { firstAfter } from './schedule.js';
 import { exportCSV, importCSV, csvTemplate, download } from './files.js';
 import { releases } from './releases.js';
@@ -98,7 +99,7 @@ const channel = 'BroadcastChannel' in window ? new BroadcastChannel('daily-ledge
 const showError = error => error instanceof Error ? error.message : '操作失败，请重试。';
 const motion = matchMedia('(prefers-reduced-motion: no-preference)');
 let pageAnimation, toastAnimation;
-let wallKey,wallURL,wallTask=0;
+let wallKey,wallMediaKey,wallURL,wallTask=0;
 const wallLayer=$('#page-wallpaper');
 
 function syncWallpaper() {
@@ -106,14 +107,18 @@ function syncWallpaper() {
   const key=JSON.stringify([wall,motion.matches]);
   if (key===wallKey) return;
   wallKey=key;
+  const active=Boolean(wall?.color || wall?.media);
+  document.body.classList.toggle('has-wallpaper',active);
+  document.body.style.setProperty('--wall-surface',String(1-(wall?.transparency ?? defaultWallpaperTransparency)/100));
+  wallLayer.style.backgroundColor=wall?.color || '';
+  wallLayer.style.setProperty('--wall-shade',String((wall?.shade ?? 0)/100));
+  const mediaKey=JSON.stringify([wall?.media,wall?.fit,wall?.position,motion.matches]);
+  if (mediaKey===wallMediaKey) return;
+  wallMediaKey=mediaKey;
   const task=++wallTask;
   wallLayer.replaceChildren();
   if (wallURL) URL.revokeObjectURL(wallURL);
   wallURL=undefined;
-  const active=Boolean(wall?.color || wall?.media);
-  document.body.classList.toggle('has-wallpaper',active);
-  wallLayer.style.backgroundColor=wall?.color || '';
-  wallLayer.style.setProperty('--wall-shade',String((wall?.shade ?? 0)/100));
   if (!wall?.media) return;
   const video=wallpaperVideos.includes(wall.media.type);
   if (!motion.matches && (video || /image\/(gif|webp|avif|png)/.test(wall.media.type))) return;
@@ -312,6 +317,7 @@ function openDebtFromReminder() {
 function openWallpaper(id) {
   if (!Object.hasOwn(wallpaperPageNames,id)) return;
   const wall=ui.root.wallpapers?.[id];
+  const transparency=wall?.transparency ?? wallpaperFor(ui.root,id)?.transparency ?? defaultWallpaperTransparency;
   const types=[...wallpaperImages,...wallpaperVideos].join(',');
   modalFrame({kind:'wallpaper',id},`${wallpaperPageNames[id]}背景`,
     `<p class="muted">${id==='overview'?'总览背景也会用于未单独设置的页面。':'此页可以独立设置，也可以跟随总览。'}</p>
@@ -325,7 +331,10 @@ function openWallpaper(id) {
       ${label('显示方式',`<select name="fit">${optionMap({cover:'铺满屏幕',contain:'完整显示'},wall?.fit)}</select>`)}
       ${label('对齐',`<select name="position">${optionMap({center:'居中',top:'靠上',bottom:'靠下'},wall?.position)}</select>`)}
     </div>
-    ${label('内容可读性 · 浅色遮罩',`<input type="range" name="shade" min="0" max="85" value="${wall?.shade ?? 32}">`)}
+    ${label('壁纸亮度 · 浅色遮罩',`<input type="range" name="shade" min="0" max="85" value="${wall?.shade ?? 32}">`)}
+    ${label(`卡片与导航栏透明度 <output id="wall-transparency">${transparency}%</output>`,
+      `<input type="range" name="transparency" min="0" max="100" value="${transparency}">`)}
+    <p class="muted">透明度越高，越能看清壁纸。文字和图标保持清晰度。</p>
     <p class="muted">视频会静音循环播放。优先使用设备支持的 MP4 视频。</p>
     <div class="actions">
     ${id!=='overview' || wall?'<button type="submit" value="reset" class="button neutral">'+(id==='overview'?'恢复系统底色':'跟随总览')+'</button>':''}
@@ -1109,8 +1118,14 @@ async function submitModal(event) {
         }
         const currentMedia=media ?? (data.has('remove-media')?undefined:wallpapers[state.id]?.media);
         const color=data.has('use-color')?get('color'):'';
-        if (!color && !currentMedia) { delete wallpapers[state.id]; return; }
+        const transparency=Number(get('transparency'));
+        if (!color && !currentMedia && (state.id==='overview' ||
+            transparency===(wallpapers.overview?.transparency ?? defaultWallpaperTransparency))) {
+          delete wallpapers[state.id];
+          return;
+        }
         wallpapers[state.id]={color,fit:get('fit'),position:get('position'),shade:Number(get('shade')),
+          transparency,
           ...(currentMedia?{media:currentMedia}:{})};
       },'已保存页面背景',()=>{ location.hash=state.id; },files,true);
     } else if (state.kind==='auto-capture') {
@@ -1389,6 +1404,10 @@ document.addEventListener('click',async event=>{
 });
 document.addEventListener('submit',submitModal);
 document.addEventListener('input',event=>{
+  if (dialog.open && modal?.kind==='wallpaper' && event.target.name==='transparency') {
+    $('#wall-transparency').value=`${event.target.value}%`;
+    return;
+  }
   const {filter:key,selectEntry}=event.target.dataset;
   if (selectEntry && ui.entrySelection) {
     if (event.target.checked) ui.entrySelection.add(selectEntry);
