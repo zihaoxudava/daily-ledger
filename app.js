@@ -585,6 +585,14 @@ function openOffline() {
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
 }
 
+function openHuaweiInstall() {
+  modalFrame({kind:'info'},'华为／鸿蒙',`
+    <p><strong>HarmonyOS 5 及以上</strong>。用华为浏览器打开日常账本，点网页菜单「∷ → 添加至桌面」。以后点桌面图标即可打开网页版。</p>
+    <a class="guide-link" href="./guide/#huawei">查看华为安装步骤</a>
+    <p><strong>支持安装 APK 的华为设备</strong>。可下载现有 Android 安装包，按系统提示安装独立版。</p>
+    <a class="button secondary" href="https://zihaoxudava.github.io/daily-ledger/downloads/daily-ledger-android.apk">下载 Android 安装包</a>`,submit('知道了'));
+}
+
 async function installApp() {
   if (!installPrompt) return;
   const prompt=installPrompt;
@@ -1050,6 +1058,7 @@ const actions = {
   'dismiss-release':markReleaseSeen,
   'ask-delete':askDelete,
   'offline-info':openOffline,
+  'huawei-install':openHuaweiInstall,
   'check-update':manualCheckUpdate,
   'install-app':installApp,
   'pick-csv':()=>chooseFile('csv'),

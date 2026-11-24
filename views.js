@@ -420,6 +420,7 @@ function settings() {
     <section class="panel section-gap">${panelHead('安装与帮助')}<div class="setting-grid">
     ${android?setting('save','应用信息','版本、更新和离线状态','offline-info'):setting('save','安装到桌面','手机、平板和电脑 · 支持离线','offline-info')}
     ${android?'':setting('save','下载 Android 安装包','三星及安卓 · 从桌面独立打开','', './downloads/daily-ledger-android.apk')}
+    ${setting('save','华为／鸿蒙','查看适合本机的安装方式','huawei-install')}
     ${setting('records','版本更新','查看本次及历次改动','','#updates')}
     ${setting('guide','使用手册','安装、记账、预算和换机','', './guide/')}
     </div></section>
