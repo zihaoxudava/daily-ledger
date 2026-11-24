@@ -19,6 +19,9 @@ const dialogContent = $('#dialog-content');
 const categoryDialog = $('#quick-category');
 const fileInput = $('#file-input');
 const toast = $('#toast');
+const mobileBar = $('.mobile-bar');
+const mobileLayout = matchMedia('(max-width:759px)');
+let lastHeaderY=0, headerTravel=0;
 const [currentRelease] = releases;
 const appVersion = currentRelease.version;
 const releaseSeenKey = 'daily-ledger-seen-release';
@@ -108,14 +111,15 @@ const wallpaperObjectPosition=wall=>`${wall.positionX ?? 'center'} ${wall.positi
 function tintStatusBar(wall,media) {
   if (!navigator.standalone) return;
   let tint=wall?.color || defaultStatusTint;
+  let gradient='';
   if (wall) {
     const canvas=document.createElement('canvas');
-    canvas.width=16;
+    canvas.width=30;
     canvas.height=1;
     const context=canvas.getContext('2d',{willReadFrequently:true});
     if (context) {
       context.fillStyle=tint;
-      context.fillRect(0,0,16,1);
+      context.fillRect(0,0,canvas.width,1);
       const width=media?.naturalWidth || media?.videoWidth;
       const height=media?.naturalHeight || media?.videoHeight;
       const viewWidth=wallLayer.clientWidth, viewHeight=wallLayer.clientHeight;
@@ -127,22 +131,30 @@ function tintStatusBar(wall,media) {
         const band=Math.max(1,Math.min(visibleHeight,32/scale));
         if (position*(viewHeight-height*scale)<32) {
           try {
-            context.drawImage(media,(width-visibleWidth)*positionX,(height-visibleHeight)*position,visibleWidth,band,0,0,16,1);
+            const horizontalGap=Math.max(0,viewWidth-width*scale);
+            const start=horizontalGap*positionX/viewWidth*canvas.width;
+            context.drawImage(media,(width-visibleWidth)*positionX,(height-visibleHeight)*position,visibleWidth,band,
+              start,0,canvas.width*(1-horizontalGap/viewWidth),1);
           } catch {}
         }
       }
       context.fillStyle=`rgb(246 249 246 / ${wall.shade/100})`;
-      context.fillRect(0,0,16,1);
-      const sample=context.getImageData(0,0,16,1).data;
-      const channels=[0,0,0];
-      for (let i=0;i<sample.length;i+=4) for(let n=0;n<3;n++) channels[n]+=sample[i+n];
-      tint='#'+channels.map(value=>Math.round(value/16).toString(16).padStart(2,'0')).join('');
+      context.fillRect(0,0,canvas.width,1);
+      const sample=context.getImageData(0,0,canvas.width,1).data;
+      const average=(start,end)=>{
+        const channels=[0,0,0];
+        for (let i=start*4;i<end*4;i+=4) for(let n=0;n<3;n++) channels[n]+=sample[i+n];
+        return '#'+channels.map(value=>Math.round(value/(end-start)).toString(16).padStart(2,'0')).join('');
+      };
+      tint=average(0,30);
+      gradient=`linear-gradient(90deg,${average(0,10)},${average(10,20)},${average(20,30)})`;
     }
   }
   $('[name=theme-color]').content=tint;
   const surface=wall?tint:'';
   document.documentElement.style.backgroundColor=surface;
   document.body.style.backgroundColor=surface;
+  document.body.style.setProperty('--status-gradient',gradient);
 }
 
 function syncWallpaper() {
@@ -206,6 +218,26 @@ function tell(message, success=false) {
   toastTimer = setTimeout(() => { toast.hidden=true; }, 4200);
 }
 
+function showMobileBar() {
+  mobileBar.classList.remove('is-collapsed');
+  lastHeaderY=Math.max(0,scrollY);
+  headerTravel=0;
+}
+
+function updateMobileBar() {
+  const y=Math.max(0,scrollY);
+  if (!mobileLayout.matches || y<=56 || dialog.open || mobileBar.contains(document.activeElement)) {
+    showMobileBar();
+    return;
+  }
+  const delta=y-lastHeaderY;
+  lastHeaderY=y;
+  if (!delta) return;
+  headerTravel=Math.sign(delta)===Math.sign(headerTravel)?headerTravel+delta:delta;
+  if (headerTravel>=24) mobileBar.classList.add('is-collapsed');
+  if (headerTravel<=-16) mobileBar.classList.remove('is-collapsed');
+}
+
 function route(resetScroll=false) {
   const hash = location.hash.slice(1);
   const previous=page;
@@ -215,7 +247,10 @@ function route(resetScroll=false) {
   ui.savingDetailId=page==='saving-detail' ? history.state?.savingId : null;
   render();
   if (page==='updates') markReleaseSeen();
-  if (resetScroll) scrollTo(0,previous==='report-detail' && page==='reports' ? history.state?.reportScroll ?? 0 : 0);
+  if (resetScroll) {
+    scrollTo(0,previous==='report-detail' && page==='reports' ? history.state?.reportScroll ?? 0 : 0);
+    showMobileBar();
+  }
   if (book && previous && previous!==page) {
     pageAnimation?.cancel();
     pageAnimation=enter(content,5,150);
@@ -1633,6 +1668,9 @@ dialog.addEventListener('close',()=>{
 });
 window.visualViewport?.addEventListener('resize',fitBatchSheet);
 window.visualViewport?.addEventListener('scroll',fitBatchSheet);
+window.addEventListener('scroll',updateMobileBar,{passive:true});
+mobileLayout.addEventListener?.('change',showMobileBar);
+mobileBar.addEventListener('focusin',showMobileBar);
 window.addEventListener('hashchange',()=>route(true));
 window.addEventListener('pageshow',event=>{
   if (!event.persisted) return;
