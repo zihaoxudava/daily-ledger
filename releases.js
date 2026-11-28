@@ -1,5 +1,10 @@
 export const releases = [
   {
+    version:'1.7.2',
+    title:'iPhone／iPad 桌面小组件',
+    changes:['通过免费 Scriptable 小组件在主屏幕快速记录支出或收入，再用 CSV 批量导入现有账本。安装步骤在使用手册。'],
+  },
+  {
     version:'1.7.1',
     title:'明细突出显示图片和文件',
     changes:['有附件的账目用醒目标签显示图片、文件数量。明细可只看有附件的账目，也可按附件名搜索。'],

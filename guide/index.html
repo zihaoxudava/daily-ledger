@@ -21,6 +21,9 @@
   p+p,ul+p,ol+p{margin-top:8px}
   a{color:#215c3a;font-weight:700}
   .launch{display:inline-block;color:#173d2d;background:#cbf078;border-radius:9px;margin-top:12px;padding:6px 13px;text-decoration:none}
+  button.launch{border:0;font:inherit;font-weight:700;cursor:pointer}
+  #widget-source{display:block;width:100%;min-height:6rem;margin-top:8px;font:13px/1.4 monospace}
+  #widget-source[hidden]{display:none}
   code{white-space:normal;overflow-wrap:anywhere;color:#1e5536}
   footer{font-size:.85rem;color:#53655a;margin:14px 4px}
   @media print{main{padding:0}header{background:none;color:inherit;border:1px solid #dce4dd}header p{color:inherit}section{break-inside:avoid}}
@@ -42,6 +45,21 @@
       <li><strong>Mac</strong>。macOS 14 及以上可在 Safari 选「文件 → 添加到程序坞」，也可用 Chrome 安装。<a href="https://support.apple.com/zh-cn/104996">Apple 指南</a></li>
     </ul>
     <p>从新图标联网打开一次，等页面显示「离线可用」。换设备或从另一浏览器迁移账目时，请导出完整备份后在目标账本恢复。</p>
+  </section>
+  <section id="iphone-widget">
+    <h2>iPhone／iPad 桌面小组件</h2>
+    <p>在桌面就能记支出、收入。需要免费安装一次 Scriptable。<a href="https://apps.apple.com/cn/app/scriptable/id1405459188">从 App Store 获取 Scriptable</a></p>
+    <button type="button" class="launch" id="copy-widget" disabled>复制小组件代码</button>
+    <p id="widget-copy-status" role="status"></p>
+    <textarea id="widget-source" aria-label="小组件代码" readonly hidden></textarea>
+    <ol>
+      <li>复制代码。打开 Scriptable，点「＋」创建脚本，粘贴代码，命名为「日常账本」，点完成。</li>
+      <li>长按 iPhone 桌面，选「编辑 → 添加小组件」，搜索 Scriptable，添加中号小组件。</li>
+      <li>长按刚添加的小组件，选「编辑小组件 → Script」，选择「日常账本」。桌面即可点「支出」「收入」快速记账。</li>
+      <li>要并入原账本，点小组件「导出」，把 CSV 存到「文件」。从原来的日常账本图标打开，进「更多 → 数据与备份 → 导入 CSV」，选该文件并确认。重复导入时会跳过已有编号。</li>
+    </ol>
+    <p>快记先存在本机 Scriptable 中，需要手动导入才会出现在原账本。小组件界面不显示金额和备注。</p>
+    <p><a href="./iphone-widget.js" download>下载小组件源码</a></p>
   </section>
   <section id="huawei">
     <h2>华为／鸿蒙设备</h2>
@@ -150,7 +168,32 @@
     <p>通知图案来自 <a href="https://github.com/jdecked/twemoji/tree/v15.1.0">Twemoji</a>，版权归 Twitter, Inc. 及贡献者，采用 <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> 许可。</p>
   </section>
   <p>在「明细」里，有附件的账目会标出图片和文件的数量。点「只看有附件」可筛选，也可搜索附件名。</p>
-  <footer>日常账本 1.7.1</footer>
+  <footer>日常账本 1.7.2</footer>
 </main>
+<script>
+  const copyWidget = document.querySelector('#copy-widget');
+  const widgetSource = document.querySelector('#widget-source');
+  const copyStatus = document.querySelector('#widget-copy-status');
+  fetch('./iphone-widget.js').then(response => {
+    if (!response.ok) throw new Error('下载失败');
+    return response.text();
+  }).then(source => {
+    widgetSource.value = source;
+    copyWidget.disabled = false;
+  }).catch(() => {
+    copyStatus.textContent = '暂时无法加载代码，请重试或点下方链接下载源码。';
+  });
+  copyWidget.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(widgetSource.value);
+      copyStatus.textContent = '已复制，可以打开 Scriptable 粘贴。';
+    } catch {
+      widgetSource.hidden = false;
+      widgetSource.focus();
+      widgetSource.select();
+      copyStatus.textContent = '请长按文本框，选「全选」再点「拷贝」。';
+    }
+  });
+</script>
 </body>
 </html>

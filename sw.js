@@ -1,7 +1,7 @@
 'use strict';
 
 const prefix = 'daily-ledger-shell-';
-const cacheName = prefix + '1.7.1';
+const cacheName = prefix + '1.7.2';
 const base = new URL(self.registration.scope);
 const assets = [
   ['./','text/html'], ['./style.css','text/css'], ['./app.js','javascript'],
@@ -10,7 +10,7 @@ const assets = [
   ['./attachments.js','javascript'], ['./note.js','javascript'], ['./native.js','javascript'],
   ['./archive.js','javascript'], ['./statements.js','javascript'], ['./vendor/zip.min.js','javascript'],
   ['./apple-touch-icon.png','image/png'], ['./icon-192.png','image/png'], ['./icon-512.png','image/png'],
-  ['./guide/','text/html'],
+  ['./guide/','text/html'], ['./guide/iphone-widget.js','javascript'],
 ].map(([path,type]) => [new URL(path,base).href,type]);
 const known = new Set(assets.map(([url])=>url));
 

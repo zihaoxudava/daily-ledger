@@ -1108,6 +1108,7 @@ function openOffline() {
     <button type="button" class="button secondary" data-action="check-update">检查更新</button>
     <p id="manual-update-status" aria-live="polite" hidden></p>
     <button type="button" class="button neutral" data-action="show-releases">版本更新</button>
+    <a class="guide-link" href="./guide/#iphone-widget">iPhone／iPad 桌面小组件</a>
     <a class="guide-link" href="./guide/">查看使用手册</a>`,submit('知道了'));
 }
 
