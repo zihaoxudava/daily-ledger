@@ -121,15 +121,20 @@ export function entryRow(book, entry, selection=null) {
   const title = entry.note || (entry.type === 'transfer' ? '账户转账' : category.name);
   const from = accountOf(book,entry.account).name;
   const account = entry.to ? `${from} → ${accountOf(book,entry.to).name}` : from;
-  const details = [fmtDate(entry.date),entry.time,entry.type === 'refund' ? `退款 · ${category.name}` : category?.name,account,
-    entry.attachments?.length ? `${entry.attachments.length} 个附件` : ''].filter(Boolean).join(' · ');
+  const details = [fmtDate(entry.date),entry.time,entry.type === 'refund' ? `退款 · ${category.name}` : category?.name,account].filter(Boolean).join(' · ');
+  const attachments=entry.attachments ?? [];
+  const photos=attachments.filter(item=>item.type.startsWith('image/') ||
+    ((!item.type || item.type==='application/octet-stream') && /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i.test(item.name))).length;
+  const files=attachments.length-photos;
+  const attachmentLabel=[photos?`图片 ${photos}`:'',files?`文件 ${files}`:''].filter(Boolean).join(' · ');
+  const badge=attachmentLabel?`<span class="entry-attachments">${icon(photos?'photo':'file')}<span>${attachmentLabel}</span></span>`:'';
   const symbol = entry.type === 'expense' ? '−' : entry.type === 'transfer' ? '' : '+';
   const mark = entry.type === 'transfer' ? icon('transfer') : esc(groupOf(book,category.group).icon);
-  const body=`<span><span class="entry-title">${esc(title)}</span><span class="entry-caption">${esc(details)}</span></span>
+  const body=`<span><span class="entry-title">${esc(title)}</span><span class="entry-caption">${esc(details)}</span>${badge}</span>
     <strong class="number ${symbol==='+'?'positive':''}">${symbol}${money(entry.amount)}</strong>`;
   if (selection) {
     return `<label class="transaction record-pick">
-      <input type="checkbox" data-select-entry="${entry.id}" aria-label="选中 ${esc(title)}"${selection.has(entry.id)?' checked':''}>${body}</label>`;
+      <input type="checkbox" data-select-entry="${entry.id}" aria-label="选中 ${esc(title)}${attachmentLabel?`，${attachmentLabel}`:''}"${selection.has(entry.id)?' checked':''}>${body}</label>`;
   }
   return `<button class="transaction" type="button" data-action="entry" data-id="${entry.id}">
     <span class="tx-icon">${mark}</span>${body}</button>`;
@@ -244,8 +249,10 @@ export function filtered(book, ui) {
     (!f.type || entry.type===f.type) &&
     (!f.account || [entry.account,entry.to].includes(f.account)) &&
     (!f.group || categoryOf(book,entry.category)?.group===f.group) &&
+    (!f.attachments || entry.attachments?.length) &&
     (!query || [entry.note,categoryLabel(book,entry.category),accountOf(book,entry.account)?.name,accountOf(book,entry.to)?.name,(entry.amount/100).toFixed(2), String(entry.amount/100),dateAndTime(entry)]
-      .some(item => String(item ?? '').toLowerCase().includes(query)))));
+      .some(item => String(item ?? '').toLowerCase().includes(query)) ||
+      (entry.attachments ?? []).some(item=>item.name.toLowerCase().includes(query)))));
 }
 
 function datedRows(book,entries,selection=null) {
@@ -275,14 +282,15 @@ export function recordsList(book,ui) {
     (list.length>visible.length ? `<div class="section-gap">${button('显示更多','load-more','secondary')}</div>` : '');
 }
 function records(book,ui) {
-  const {query,type,account,group,all} = ui.filter;
+  const {query,type,account,group,all,attachments} = ui.filter;
   return header('明细','搜索、筛选和编辑账目',period(ui.month)) +
     `<div class="inline-actions"><div class="segments"><button data-action="filter-scope" data-id="month" ${selected(all,false)}>所选月份</button><button data-action="filter-scope" data-id="all" ${selected(all,true)}>全部记录</button></div>${button('＋ 记一笔','new','primary')}${button('批量记账','batch','secondary')}${button('账户转账','new','secondary','transfer')}</div>
       <div class="filter">
-        <input id="filter-query" data-filter="query" aria-label="搜索备注、金额或分类" placeholder="搜索备注、金额或分类" value="${esc(query)}" type="search">
+        <input id="filter-query" data-filter="query" aria-label="搜索备注、金额、分类或附件名" placeholder="搜账目或附件名" value="${esc(query)}" type="search">
         <select data-filter="type" aria-label="收支类型">${option('','全部类型',type)+optionMap(types,type)}</select>
         <select data-filter="account" aria-label="账户">${option('','全部账户',account)+book.accounts.map(a=>option(a.id,a.name,account)).join('')}</select>
         <select data-filter="group" aria-label="分类组">${option('','全部分类组',group)+groupOptions(book,group)}</select>
+        <button class="button neutral attachment-filter" type="button" data-action="filter-attachments" ${selected(Boolean(attachments),true)}>${icon('file')}只看有附件</button>
       </div>
       <section class="panel" id="records-list">${recordsList(book,ui)}</section>`;
 }

@@ -29,7 +29,7 @@ const appVersion = currentRelease.version;
 const releaseSeenKey = 'daily-ledger-seen-release';
 const updateViewKey = 'daily-ledger-update-view';
 const ui = {
-  month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false}, limit:50,
+  month:today().slice(0,7), filter:{query:'',type:'',account:'',group:'',all:false,attachments:false}, limit:50,
   year:false, categoryKind:'expense', openGroups:new Set(), offlineReady:false,
   monthOverviewYear:Number(today().slice(0,4)),
   entrySelection:null,
@@ -438,7 +438,7 @@ function selectLedger(id, target='overview') {
   ui.ledgerId=id;
   try { localStorage.setItem(ledgerKey,id); } catch {}
   useRoot(ui.root);
-  ui.filter={query:'',type:'',account:'',group:'',all:false};
+  ui.filter={query:'',type:'',account:'',group:'',all:false,attachments:false};
   ui.entrySelection=null;
   ui.openGroups.clear();
   ui.limit=50;
@@ -1737,6 +1737,13 @@ const actions = {
   'select-month':finishMonthOverview,
   'close-months':()=>finishMonthOverview(),
   'filter-scope':id=>{ ui.filter.all=id==='all'; ui.entrySelection?.clear(); ui.limit=50; render(); },
+  'filter-attachments':(_id,button)=>{
+    ui.filter.attachments=!ui.filter.attachments;
+    button.setAttribute('aria-pressed',String(ui.filter.attachments));
+    ui.entrySelection?.clear();
+    ui.limit=50;
+    renderRecordResults();
+  },
   'report-range':id=>{ ui.year=id==='year'; render(); },
   'load-more':()=>{ ui.limit+=50; renderRecordResults(); },
   close:()=>{ if (!busy) closeModal(); },
